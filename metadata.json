@@ -1,0 +1,8 @@
+{
+  "name": "Bodhi — Buddhist Meditation Sanctuary",
+  "description": "Sit, breathe, awaken. 1,040 guided Buddhist meditations, singing-bowl timer, Dhamma teachings, journal, and an agentic guide.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
