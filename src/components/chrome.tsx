@@ -228,6 +228,5 @@ export async function cachedFetch<T>(url: string, ttlMs = 60_000, signal?: Abort
   return data;
 }
 export function useMemoKey(...parts: (string | number)[]) {
-  return useMemo(() => parts.join("|"), // eslint-disable-next-line react-hooks/exhaustive-deps
-    parts);
+  return parts.join("|");
 }

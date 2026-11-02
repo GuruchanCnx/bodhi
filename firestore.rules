@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Health and connection check
+    match /test/{testId} {
+      allow read, write: if isValidId(testId);
+    }
+
+    // Meditation sessions
+    match /meditation_sessions/{sessionId} {
+      allow read: if isValidId(sessionId);
+      allow create: if isValidId(sessionId)
+        && incoming().technique is string && incoming().technique.size() <= 80
+        && incoming().title is string && incoming().title.size() <= 160
+        && incoming().durationSeconds is number
+        && incoming().completed is bool
+        && incoming().createdAt is string;
+      allow update: if isValidId(sessionId)
+        && incoming().technique is string
+        && incoming().durationSeconds is number;
+      allow delete: if isValidId(sessionId);
+    }
+
+    // Journal reflections
+    match /journal_entries/{entryId} {
+      allow read: if isValidId(entryId);
+      allow create: if isValidId(entryId)
+        && incoming().title is string && incoming().title.size() <= 200
+        && incoming().content is string && incoming().content.size() <= 10000
+        && incoming().createdAt is string;
+      allow update: if isValidId(entryId)
+        && incoming().content is string && incoming().content.size() <= 10000;
+      allow delete: if isValidId(entryId);
+    }
+
+    // Daily habits tracker
+    match /habits/{habitId} {
+      allow read: if isValidId(habitId);
+      allow create: if isValidId(habitId)
+        && incoming().title is string && incoming().title.size() <= 120
+        && incoming().targetMinutes is number
+        && incoming().active is bool
+        && incoming().createdAt is string;
+      allow update: if isValidId(habitId)
+        && incoming().title is string && incoming().title.size() <= 120;
+      allow delete: if isValidId(habitId);
+    }
+
+    // Practice programs / plans
+    match /practice_plans/{planId} {
+      allow read: if isValidId(planId);
+      allow create: if isValidId(planId)
+        && incoming().title is string && incoming().title.size() <= 120
+        && incoming().active is bool
+        && incoming().createdAt is string;
+      allow update: if isValidId(planId);
+      allow delete: if isValidId(planId);
+    }
+  }
+}

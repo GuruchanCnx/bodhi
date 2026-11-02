@@ -7,6 +7,7 @@ import { dailyItem, meditations, quotes, eightfoldPath } from "@/lib/content";
 import { Mandala, Petals, SectionHeading, Stat } from "@/components/ui";
 import TodayPath from "@/components/today-path";
 import { AgentBriefing, PlanBuilder } from "@/components/agent-widgets";
+import HabitsSection from "@/components/habits-section";
 
 export const revalidate = 3600; // ISR: stats refresh hourly, instant CDN hits
 
@@ -19,8 +20,8 @@ const getStatsCached = unstable_cache(
           from meditation_sessions where completed = true`),
         db.execute(sql`select count(*)::int as c from meditation_techniques`),
       ]);
-      const row = s.rows[0] as unknown as { sessions: number; seconds: number };
-      const tech = t.rows[0] as unknown as { c: number };
+      const row = (s?.rows?.[0] as unknown as { sessions?: number; seconds?: number }) ?? {};
+      const tech = (t?.rows?.[0] as unknown as { c?: number }) ?? {};
       return {
         sessions: row.sessions ?? 0,
         minutes: Math.round((row.seconds ?? 0) / 60),
@@ -154,6 +155,11 @@ export default async function HomePage() {
       </section>
       <section className="cv-auto mx-auto max-w-6xl px-5 py-4">
         <PlanBuilder />
+      </section>
+
+      {/* DAILY HABITS TRACKER */}
+      <section className="cv-auto mx-auto max-w-6xl px-5 py-4">
+        <HabitsSection />
       </section>
 
       {/* PRACTICES — content-visibility for 1000+ scroll perf */}

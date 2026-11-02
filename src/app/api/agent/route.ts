@@ -5,33 +5,37 @@ import { briefingCopy, debriefCopy, planArchetype } from "@/lib/agentic";
 
 export const dynamic = "force-dynamic";
 
+import { getSessionsFromFirestore } from "@/lib/firestore-service";
+import { meditations } from "@/lib/content";
+
 // ---------- helpers ----------
 async function getStatsFast() {
   try {
-    const [t, perDay] = await Promise.all([
-      db.execute(sql`
-        select count(*)::int as sessions, coalesce(sum(duration_seconds),0)::int as seconds,
-               coalesce(avg(duration_seconds),0)::int as avg_seconds
-        from meditation_sessions where completed = true`),
-      db.execute(sql`
-        select to_char(created_at,'YYYY-MM-DD') as day from meditation_sessions
-        where created_at > now() - interval '60 days' group by 1 order by 1`),
-    ]);
-    const row = t.rows[0] as unknown as { sessions: number; seconds: number; avg_seconds: number };
-    const days = (perDay.rows as unknown as { day: string }[]).map((r) => r.day);
-    const set = new Set(days);
+    const sessions = await getSessionsFromFirestore(100).catch(() => []);
+    const completed = sessions.filter((s) => s.completed !== false);
+    const totalSessions = completed.length;
+    let totalSeconds = 0;
+    const days = new Set<string>();
+
+    for (const s of completed) {
+      totalSeconds += s.durationSeconds;
+      const day = (s.createdAt || "").slice(0, 10);
+      if (day) days.add(day);
+    }
+
     let streak = 0;
     const cur = new Date();
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    if (!set.has(fmt(cur))) cur.setDate(cur.getDate() - 1);
-    while (set.has(fmt(cur)) && streak <= 365) {
+    if (!days.has(fmt(cur))) cur.setDate(cur.getDate() - 1);
+    while (days.has(fmt(cur)) && streak <= 365) {
       streak++;
       cur.setDate(cur.getDate() - 1);
     }
+
     return {
-      sessions: row.sessions ?? 0,
-      minutes: Math.round((row.seconds ?? 0) / 60),
-      avgMinutes: Math.round((row.avg_seconds ?? 0) / 60),
+      sessions: totalSessions,
+      minutes: Math.round(totalSeconds / 60),
+      avgMinutes: totalSessions > 0 ? Math.round(totalSeconds / totalSessions / 60) : 0,
       streak,
     };
   } catch {
@@ -60,7 +64,24 @@ async function pickOne(category: string, exclude: Set<string>, minutes: number, 
     .limit(60);
   const pool = rows.filter((r) => !exclude.has(r.slug));
   const src = pool.length ? pool : rows;
-  if (!src.length) return null;
+  if (!src.length) {
+    const fallback = meditations
+      .map((m) => ({
+        slug: m.slug,
+        name: m.name,
+        pali: m.pali,
+        tradition: m.tradition,
+        level: m.level,
+        category: m.tradition === "Theravāda" ? "Breath" : "Insight",
+        durations: m.durations,
+        essence: m.essence,
+        color: m.color,
+        symbol: m.symbol,
+      }))
+      .filter((r) => !exclude.has(r.slug));
+    const fallbackPool = fallback.length ? fallback : meditations;
+    return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+  }
   // prefer duration match, then level match, deterministic by day seed
   const idx = Math.floor(Math.random() * src.length);
   // try duration fit first

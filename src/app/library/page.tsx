@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { meditations } from "@/lib/content";
 import { SectionHeading, SkeletonCard } from "@/components/ui";
 import { cachedFetch, pushRecent, useDebounced, useFavorites } from "@/components/chrome";
+import DharmaQuoteWidget from "@/components/dharma-quote-widget";
 
 type Tech = {
   slug: string; name: string; pali: string | null; tradition: string; level: string;
@@ -169,6 +170,10 @@ export default function LibraryPage() {
         title="Over a thousand doors to stillness"
         sub={`${(data?.total ?? 1040) + 8} practices — 8 roots + living canon. Filters live in the URL (share them!) · ♥ bookmarks · 🪷 Guide plans.`}
       />
+
+      <div className="mt-6">
+        <DharmaQuoteWidget />
+      </div>
 
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <button onClick={() => setShowFavs((v) => !v)} className={`rounded-full px-4 py-2 text-xs font-bold transition ${showFavs ? "bg-rose-700 text-white" : "border border-stone-300 bg-white text-stone-600 hover:border-rose-500"}`} aria-pressed={showFavs}>

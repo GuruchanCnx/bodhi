@@ -76,7 +76,6 @@ export default function JourneyPage() {
     const avgMin = Math.round(stats.totals.avgSeconds / 60);
     parts.push(avgMin >= 20 ? `Avg ${avgMin} min — samādhi ripening beautifully.` : "Tip: lengthen one sit/week by 5 min — mind settles in layers.");
     return parts.join(" ");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stats]);
 
   const askCoach = async () => {
