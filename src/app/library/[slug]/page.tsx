@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, eq, ne, sql } from "drizzle-orm";
-import { unstable_cache } from "next/cache";
-import { db } from "@/db";
-import { meditationTechniques } from "@/db/schema";
+import { allCanonTechniques, findTechniqueBySlug } from "@/lib/canon";
 import { meditations } from "@/lib/content";
 import FavButton from "@/components/fav-button";
 
+export const dynamicParams = true;
 export const revalidate = 3600;
 
 export function generateStaticParams() {
@@ -15,40 +13,34 @@ export function generateStaticParams() {
 }
 
 type Norm = {
-  slug: string; name: string; pali: string; tradition: string; level: string;
-  category?: string; durations: number[]; description: string; essence: string;
-  instructions: string[]; benefits: string[]; cues?: { at: number; text: string }[];
-  source: string; color: string; symbol: string; fromDb: boolean;
+  slug: string;
+  name: string;
+  pali: string;
+  tradition: string;
+  level: string;
+  category?: string;
+  durations: number[];
+  description: string;
+  essence: string;
+  instructions: string[];
+  benefits: string[];
+  cues?: { at: number; text: string }[];
+  source: string;
+  color: string;
+  symbol: string;
+  fromDb: boolean;
 };
-
-const getTechCached = (slug: string) =>
-  unstable_cache(
-    async () => {
-      const rows = await db
-        .select()
-        .from(meditationTechniques)
-        .where(eq(meditationTechniques.slug, slug))
-        .limit(1);
-      return rows[0] ?? null;
-    },
-    [`tech-${slug}`],
-    { revalidate: 3600 }
-  )();
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const curated = meditations.find((x) => x.slug === slug);
-  if (curated) {
+  const t = findTechniqueBySlug(slug) || meditations.find((x) => x.slug === slug);
+  if (t) {
     return {
-      title: `${curated.name} — ${curated.pali}`,
-      description: curated.description.slice(0, 155),
+      title: `${t.name} — ${t.pali || t.tradition}`,
+      description: t.description.slice(0, 155),
     };
   }
-  try {
-    const r = await getTechCached(slug);
-    if (r) return { title: `${r.name}`, description: r.description.slice(0, 155) };
-  } catch {}
-  return { title: "Practice" };
+  return { title: "Meditation Practice" };
 }
 
 export default async function DetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -56,51 +48,39 @@ export default async function DetailPage({ params }: { params: Promise<{ slug: s
 
   const curated = meditations.find((x) => x.slug === slug);
   let m: Norm | null = null;
+
   if (curated) {
     m = { ...curated, fromDb: false };
   } else {
-    try {
-      const r = await getTechCached(slug);
-      if (r) {
-        m = {
-          slug: r.slug, name: r.name, pali: r.pali ?? "", tradition: r.tradition,
-          level: r.level, category: r.category,
-          durations: (r.durations as number[]) ?? [10, 20, 30],
-          description: r.description, essence: r.essence,
-          instructions: (r.instructions as string[]) ?? [],
-          benefits: (r.benefits as string[]) ?? [],
-          source: r.source, color: r.color, symbol: r.symbol, fromDb: true,
-        };
-      }
-    } catch {
-      m = null;
+    const canonItem = findTechniqueBySlug(slug);
+    if (canonItem) {
+      m = {
+        slug: canonItem.slug,
+        name: canonItem.name,
+        pali: canonItem.pali ?? "",
+        tradition: canonItem.tradition,
+        level: canonItem.level,
+        category: canonItem.category,
+        durations: canonItem.durations ?? [10, 20, 30],
+        description: canonItem.description,
+        essence: canonItem.essence,
+        instructions: canonItem.instructions ?? [],
+        benefits: canonItem.benefits ?? [],
+        source: canonItem.source,
+        color: canonItem.color,
+        symbol: canonItem.symbol,
+        fromDb: true,
+      };
     }
   }
+
   if (!m) notFound();
 
-  // Related: prefer same category, fallback random — single query
-  let others: { slug: string; name: string; pali: string | null; color: string; symbol: string }[] = [];
-  try {
-    const rel = m.category
-      ? await db
-          .select({ slug: meditationTechniques.slug, name: meditationTechniques.name, pali: meditationTechniques.pali, color: meditationTechniques.color, symbol: meditationTechniques.symbol })
-          .from(meditationTechniques)
-          .where(and(eq(meditationTechniques.category, m.category), ne(meditationTechniques.slug, slug)))
-          .orderBy(sql`random()`)
-          .limit(3)
-      : [];
-    others = rel;
-    if (others.length < 3) {
-      const fill = await db
-        .select({ slug: meditationTechniques.slug, name: meditationTechniques.name, pali: meditationTechniques.pali, color: meditationTechniques.color, symbol: meditationTechniques.symbol })
-        .from(meditationTechniques)
-        .orderBy(sql`random()`)
-        .limit(3 - others.length);
-      others = [...others, ...fill.filter((x) => x.slug !== slug)];
-    }
-  } catch {
-    others = [];
-  }
+  // Related: prefer same category from canon, fallback to others
+  const related = allCanonTechniques
+    .filter((x) => x.slug !== slug && (m?.category ? x.category === m.category : true))
+    .slice(0, 3);
+  const others = related.length >= 3 ? related : allCanonTechniques.filter((x) => x.slug !== slug).slice(0, 3);
 
   const cues = m.cues ?? [
     { at: 0, text: "Arrive. Feel the body, the breath, the present moment." },
@@ -199,8 +179,9 @@ export default async function DetailPage({ params }: { params: Promise<{ slug: s
                 <span className="grid h-10 w-10 place-items-center rounded-xl text-lg text-white" style={{ background: o.color }}>
                   {o.symbol}
                 </span>
-                <p className="mt-2 line-clamp-2 text-sm font-semibold leading-snug text-stone-900">{o.name}</p>
-                <p className="truncate text-xs text-stone-500">{o.pali}</p>
+                <p className="mt-2 text-xs font-bold uppercase tracking-wider text-amber-800">{o.tradition}</p>
+                <h3 className="font-display mt-1 text-base font-semibold text-stone-900">{o.name}</h3>
+                {o.pali && <p className="text-[0.68rem] text-stone-400">{o.pali}</p>}
               </Link>
             ))}
           </div>

@@ -4,7 +4,23 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { breathPatterns, meditations } from "@/lib/content";
-import { playBell, playSoftTick, speakCue, startAmbient, stopAmbient, stopSpeech, unlockAudio } from "@/lib/audio";
+import {
+  AMBIENT_OPTIONS,
+  AmbientKind,
+  BELL_OPTIONS,
+  BellStyle,
+  playBell,
+  playSoftTick,
+  previewVoicePersona,
+  speakCue,
+  startAmbient,
+  stopAmbient,
+  stopSpeech,
+  unlockAudio,
+  VOICE_PERSONAS,
+  VoicePersonaId,
+} from "@/lib/audio";
+import { findTechniqueBySlug } from "@/lib/canon";
 import { BreathingOrb } from "@/components/ui";
 import { AgentDebrief } from "@/components/agent-widgets";
 import { FoldHint } from "@/components/adaptive";
@@ -55,6 +71,30 @@ function PracticeInner() {
   const meditation = useMemo(() => {
     const found = meditations.find((m) => m.slug === techniqueSlug);
     if (found) return found;
+    const canonFound = findTechniqueBySlug(techniqueSlug);
+    if (canonFound) {
+      return {
+        slug: canonFound.slug,
+        name: canonFound.name,
+        pali: canonFound.pali ?? "",
+        tradition: canonFound.tradition as "Theravāda" | "Mahāyāna" | "Zen" | "Tibetan" | "All Traditions",
+        level: canonFound.level as "Beginner" | "All Levels" | "Intermediate" | "Advanced",
+        durations: canonFound.durations?.length ? canonFound.durations : [10, 20, 30],
+        description: canonFound.description,
+        essence: canonFound.essence,
+        instructions: canonFound.instructions,
+        cues: [
+          { at: 0, text: "Arrive. Feel the body, the breath, the present moment." },
+          { at: 0.3, text: canonFound.essence },
+          { at: 0.6, text: "If lost in thought, return with kindness. Beginning again is the practice." },
+          { at: 0.9, text: "Widen awareness. Breathe with the whole being." },
+        ],
+        benefits: canonFound.benefits,
+        source: canonFound.source,
+        color: canonFound.color,
+        symbol: canonFound.symbol,
+      };
+    }
     if (dbTech) {
       return {
         slug: dbTech.slug,
@@ -88,8 +128,11 @@ function PracticeInner() {
   const [showBreath, setShowBreath] = useLocalStorage("bodhi-orb", true);
   const [soundOn, setSoundOn] = useLocalStorage("bodhi-sound", true);
   const [volume, setVolume] = useLocalStorage("bodhi-vol", 0.5);
-  const [ambient, setAmbient] = useLocalStorage<"off" | "rain" | "noise">("bodhi-ambient", "off");
+  const [bellStyle, setBellStyle] = useLocalStorage<BellStyle>("bodhi-bell-style", "tibetan");
+  const [ambient, setAmbient] = useLocalStorage<AmbientKind>("bodhi-ambient", "off");
+  const [voicePersona, setVoicePersona] = useLocalStorage<VoicePersonaId>("bodhi-voice-persona", "ananda");
   const [voiceCues, setVoiceCues] = useLocalStorage("bodhi-voice", false);
+  const [auditioningVoice, setAuditioningVoice] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
 
@@ -146,10 +189,10 @@ function PracticeInner() {
   useEffect(() => {
     if ((phase === "sitting" || phase === "paused") && voiceCues && currentCue !== lastCueRef.current) {
       lastCueRef.current = currentCue;
-      speakCue(currentCue, true);
+      speakCue(currentCue, true, voicePersona);
     }
     if (phase === "idle") lastCueRef.current = "";
-  }, [currentCue, phase, voiceCues]);
+  }, [currentCue, phase, voiceCues, voicePersona]);
 
   const clearTick = useCallback(() => {
     if (tickRef.current) clearInterval(tickRef.current);
@@ -163,24 +206,24 @@ function PracticeInner() {
     stopAmbient();
     stopSpeech();
     if (soundOn) {
-      playBell(9, volume, 432);
-      setTimeout(() => playBell(9, volume * 0.8, 384), 2500);
-      setTimeout(() => playBell(12, volume, 432), 5500);
+      playBell(9, volume, bellStyle);
+      setTimeout(() => playBell(9, volume * 0.8, bellStyle), 2500);
+      setTimeout(() => playBell(12, volume, bellStyle), 5500);
     }
     // agentic debrief (local, instant)
     const delta = moodBefore != null && moodAfter != null ? moodAfter - moodBefore : null;
     if (delta != null && delta > 0) setDebrief("🪷 Your heart brightened. What softened? Write one line so tomorrow's you remembers the way back.");
     else if (delta != null && delta < 0) setDebrief("🌧 Heavier now — that too is data, not failure. What weighed? Name it kindly; heaviness named loosens.");
     else setDebrief("✦ Sitting complete. One honest line: what did you notice in body, feeling, mind?");
-  }, [clearTick, soundOn, volume, moodBefore, moodAfter]);
+  }, [clearTick, soundOn, volume, bellStyle, moodBefore, moodAfter]);
 
   const startSitting = useCallback(() => {
     setPhase("sitting");
-    if (soundOn) playBell(7, volume, 432);
-    if (ambient !== "off") startAmbient(ambient, 0.04);
+    if (soundOn) playBell(7, volume, bellStyle);
+    if (ambient !== "off") startAmbient(ambient, 0.05);
     endAtRef.current = Date.now() + remaining * 1000;
     rungRef.current = new Set([0]);
-  }, [soundOn, volume, ambient, remaining]);
+  }, [soundOn, volume, bellStyle, ambient, remaining]);
 
   const begin = useCallback(() => {
     unlockAudio();
@@ -217,14 +260,14 @@ function PracticeInner() {
       for (const q of [0.25, 0.5, 0.75]) {
         if (frac >= q && !rungRef.current.has(q)) {
           rungRef.current.add(q);
-          if (intervalBells && soundOn) playBell(4, volume * 0.6, 540);
+          if (intervalBells && soundOn) playBell(4, volume * 0.6, bellStyle);
         }
       }
       if (left <= 0) finish();
     }, 500);
     return clearTick;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, totalSeconds]);
+  }, [phase, totalSeconds, intervalBells, soundOn, volume, bellStyle, finish, clearTick]);
 
   // pause keeps remaining; resume rebuilds endAt
   const pause = useCallback(() => {
@@ -240,7 +283,7 @@ function PracticeInner() {
   const resume = useCallback(() => {
     endAtRef.current = Date.now() + remaining * 1000;
     setPhase("sitting");
-    if (ambient !== "off") startAmbient(ambient, 0.04);
+    if (ambient !== "off") startAmbient(ambient, 0.05);
   }, [remaining, ambient]);
 
   const reset = useCallback(() => {
@@ -454,41 +497,185 @@ function PracticeInner() {
                     <p className="text-center text-sm font-bold tabular-nums">{minutes} minutes</p>
                   </div>
                 )}
-                <div className="mt-4 space-y-2 text-sm">
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2">
-                    <span>🔔 Interval bells</span>
-                    <input type="checkbox" checked={intervalBells} onChange={(e) => setIntervalBells(e.target.checked)} className="h-4 w-4 accent-amber-700" />
-                  </label>
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2">
-                    <span>🌬 Breath orb</span>
-                    <input type="checkbox" checked={showBreath} onChange={(e) => setShowBreath(e.target.checked)} className="h-4 w-4 accent-amber-700" />
-                  </label>
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2">
-                    <span>🔊 Bowl sound</span>
-                    <input type="checkbox" checked={soundOn} onChange={(e) => setSoundOn(e.target.checked)} className="h-4 w-4 accent-amber-700" />
-                  </label>
-                  <label className="flex cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2">
-                    <span>🗣 Spoken cues</span>
-                    <input type="checkbox" checked={voiceCues} onChange={(e) => setVoiceCues(e.target.checked)} className="h-4 w-4 accent-amber-700" />
-                  </label>
-                  <label className="block rounded-xl bg-stone-50 px-3 py-2">
-                    <span className="flex justify-between text-[0.8rem]"><span>🌧 Ambient</span><span className="font-bold">{ambient}</span></span>
-                    <span className="mt-1.5 flex gap-1.5">
-                      {(["off", "rain", "noise"] as const).map((a) => (
-                        <button key={a} type="button" onClick={() => setAmbient(a)} className={`flex-1 rounded-full py-1 text-xs font-bold ${ambient === a ? "bg-stone-900 text-amber-50" : "bg-white text-stone-500 border border-stone-200"}`}>{a}</button>
+                <div className="mt-4 space-y-2.5 text-sm">
+                  <div className="flex items-center justify-between rounded-xl bg-stone-50 px-3 py-2">
+                    <span className="font-medium text-stone-700">Sound enabled</span>
+                    <input
+                      type="checkbox"
+                      checked={soundOn}
+                      onChange={(e) => setSoundOn(e.target.checked)}
+                      className="h-4 w-4 accent-amber-700"
+                    />
+                  </div>
+
+                  {/* Bell Selection */}
+                  <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[0.72rem] font-bold uppercase tracking-wider text-amber-900">
+                        🔔 Sacred Bell
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          unlockAudio();
+                          playBell(5, volume, bellStyle);
+                        }}
+                        className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[0.7rem] font-bold text-amber-900 transition hover:bg-amber-500/25"
+                      >
+                        ♪ Test Bell
+                      </button>
+                    </div>
+                    <select
+                      value={bellStyle}
+                      onChange={(e) => setBellStyle(e.target.value as BellStyle)}
+                      className="mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-800 shadow-sm focus:border-amber-600 focus:outline-none"
+                    >
+                      {BELL_OPTIONS.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
                       ))}
+                    </select>
+                    <p className="mt-1 text-[0.7rem] text-stone-500">
+                      {BELL_OPTIONS.find((b) => b.id === bellStyle)?.description}
+                    </p>
+                  </div>
+
+                  {/* Ambient Soundscape */}
+                  <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[0.72rem] font-bold uppercase tracking-wider text-amber-900">
+                        🌧 Ambient Soundscape
+                      </label>
+                      <span className="text-[0.7rem] font-bold text-stone-500 capitalize">{ambient}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-1.5">
+                      {AMBIENT_OPTIONS.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => {
+                            unlockAudio();
+                            setAmbient(a.id);
+                            if (phase === "sitting") {
+                              if (a.id === "off") stopAmbient();
+                              else startAmbient(a.id, 0.05);
+                            }
+                          }}
+                          className={`rounded-lg px-2 py-1.5 text-center text-[0.68rem] font-bold transition ${
+                            ambient === a.id
+                              ? "bg-stone-900 text-amber-100 shadow-sm"
+                              : "border border-stone-200 bg-white text-stone-600 hover:border-amber-500/50"
+                          }`}
+                        >
+                          {a.name}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[0.7rem] text-stone-500">
+                      {AMBIENT_OPTIONS.find((a) => a.id === ambient)?.description}
+                    </p>
+                  </div>
+
+                  {/* Voice Persona */}
+                  <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-1.5 text-[0.72rem] font-bold uppercase tracking-wider text-amber-900">
+                        <input
+                          type="checkbox"
+                          checked={voiceCues}
+                          onChange={(e) => setVoiceCues(e.target.checked)}
+                          className="h-3.5 w-3.5 accent-amber-700"
+                        />
+                        <span>🗣 Spoken Dhamma Cues</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          unlockAudio();
+                          setAuditioningVoice(true);
+                          previewVoicePersona(voicePersona);
+                          setTimeout(() => setAuditioningVoice(false), 3000);
+                        }}
+                        className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[0.7rem] font-bold text-amber-900 transition hover:bg-amber-500/25"
+                      >
+                        {auditioningVoice ? "Speaking…" : "♪ Audition"}
+                      </button>
+                    </div>
+                    <select
+                      value={voicePersona}
+                      disabled={!voiceCues}
+                      onChange={(e) => setVoicePersona(e.target.value as VoicePersonaId)}
+                      className={`mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-800 shadow-sm focus:border-amber-600 focus:outline-none ${
+                        !voiceCues ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                    >
+                      {VOICE_PERSONAS.map((vp) => (
+                        <option key={vp.id} value={vp.id}>
+                          {vp.name} · {vp.subtitle}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[0.7rem] text-stone-500 italic">
+                      “{VOICE_PERSONAS.find((vp) => vp.id === voicePersona)?.sampleText}”
+                    </p>
+                  </div>
+
+                  {/* Helpers: Bells & Orb */}
+                  <div className="flex gap-2">
+                    <label className="flex flex-1 cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2 text-xs">
+                      <span>🔔 Intervals</span>
+                      <input
+                        type="checkbox"
+                        checked={intervalBells}
+                        onChange={(e) => setIntervalBells(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-amber-700"
+                      />
+                    </label>
+                    <label className="flex flex-1 cursor-pointer items-center justify-between rounded-xl bg-stone-50 px-3 py-2 text-xs">
+                      <span>🌬 Breath orb</span>
+                      <input
+                        type="checkbox"
+                        checked={showBreath}
+                        onChange={(e) => setShowBreath(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-amber-700"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Volume Slider */}
+                  <label className="flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs">
+                    <span className="font-medium text-stone-700">Volume</span>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={0.9}
+                      step={0.05}
+                      value={volume}
+                      onChange={(e) => setVolume(Number(e.target.value))}
+                      className="w-full accent-amber-700"
+                      aria-label="Sound volume"
+                    />
+                    <span className="w-8 text-right font-mono text-[0.7rem] text-stone-500">
+                      {Math.round(volume * 100)}%
                     </span>
                   </label>
-                  <label className="flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-[0.8rem]">
-                    <span>Volume</span>
-                    <input type="range" min={0.1} max={0.9} step={0.05} value={volume} onChange={(e) => setVolume(Number(e.target.value))} className="w-full accent-amber-700" aria-label="Bowl volume" />
-                  </label>
                 </div>
+
                 <div className="mt-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-stone-500">Heart right now?</p>
                   <div className="mt-2 flex gap-1.5" role="group" aria-label="Mood before">
                     {["😣", "😟", "😐", "🙂", "😊"].map((e, i) => (
-                      <button key={e} onClick={() => setMoodBefore(i + 1)} aria-pressed={moodBefore === i + 1} className={`rounded-xl border px-2 py-1.5 text-lg transition ${moodBefore === i + 1 ? "scale-110 border-amber-700 bg-amber-100" : "border-stone-200 hover:border-amber-500"}`}>
+                      <button
+                        key={e}
+                        onClick={() => setMoodBefore(i + 1)}
+                        aria-pressed={moodBefore === i + 1}
+                        className={`rounded-xl border px-2 py-1.5 text-lg transition ${
+                          moodBefore === i + 1
+                            ? "scale-110 border-amber-700 bg-amber-100"
+                            : "border-stone-200 hover:border-amber-500"
+                        }`}
+                      >
                         {e}
                       </button>
                     ))}
@@ -598,7 +785,7 @@ function PracticeInner() {
                     {phase === "sitting" && (
                       <>
                         <button onClick={pause} className="rounded-full border border-white/20 px-8 py-3 text-sm font-bold hover:border-amber-400">❚❚ Pause</button>
-                        <button onClick={() => { if (soundOn) playBell(4, volume * 0.6); reset(); }} className="rounded-full border border-white/20 px-6 py-3 text-sm font-semibold text-stone-400 hover:text-stone-200">End</button>
+                        <button onClick={() => { if (soundOn) playBell(4, volume * 0.6, bellStyle); reset(); }} className="rounded-full border border-white/20 px-6 py-3 text-sm font-semibold text-stone-400 hover:text-stone-200">End</button>
                       </>
                     )}
                     {phase === "paused" && (
@@ -609,7 +796,7 @@ function PracticeInner() {
                       </>
                     )}
                   </div>
-                  <button onClick={() => soundOn && playBell(5, volume)} className="mt-4 text-xs font-semibold text-stone-500 hover:text-amber-300">
+                  <button onClick={() => { unlockAudio(); if (soundOn) playBell(5, volume, bellStyle); }} className="mt-4 text-xs font-semibold text-stone-500 hover:text-amber-300">
                     ♪ Preview bowl · Space pauses · F focuses
                   </button>
                 </>

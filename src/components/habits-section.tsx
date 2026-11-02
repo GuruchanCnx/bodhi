@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/chrome";
+import { playBell, unlockAudio } from "@/lib/audio";
 
 export interface HabitItem {
   id: string;
@@ -50,22 +51,45 @@ export default function HabitsSection() {
   const [newMinutes, setNewMinutes] = useState(10);
   const [isAdding, setIsAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Daily notification state
+  const [reminderActive, setReminderActive] = useState(false);
+  const [reminderTime, setReminderTime] = useState("07:30");
+  const [notifPermission, setNotifPermission] = useState<string>("default");
+
   const toast = useToast();
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  // Last 7 days helper for habit dots
+  // Last 7 days helper for habit chart & dots
   const last7Days = useMemo(() => {
-    const days: { dateStr: string; label: string }[] = [];
+    const days: { dateStr: string; label: string; fullDate: string }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
+      const str = d.toISOString().slice(0, 10);
       days.push({
-        dateStr: d.toISOString().slice(0, 10),
-        label: d.toLocaleDateString(undefined, { weekday: "narrow" }),
+        dateStr: str,
+        label: i === 0 ? "Today" : d.toLocaleDateString(undefined, { weekday: "short" }),
+        fullDate: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
       });
     }
     return days;
+  }, []);
+
+  // Check notification permission and load saved settings
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setNotifPermission(Notification.permission);
+    }
+    try {
+      const savedReminder = localStorage.getItem("bodhi-habit-reminder");
+      if (savedReminder) {
+        const parsed = JSON.parse(savedReminder);
+        if (parsed.time) setReminderTime(parsed.time);
+        if (typeof parsed.enabled === "boolean") setReminderActive(parsed.enabled);
+      }
+    } catch {}
   }, []);
 
   // Load habits from API / Firestore or fallback to localStorage
@@ -145,6 +169,8 @@ export default function HabitsSection() {
     } catch {}
 
     if (!isDone) {
+      unlockAudio();
+      playBell(4, 0.4, 432, "tibetan");
       toast(`✦ Completed: “${habit.title}” · ${streak}-day streak!`);
     } else {
       toast("Habit unmarked for today");
@@ -233,12 +259,97 @@ export default function HabitsSection() {
     } catch {}
   };
 
+  // Toggle notification reminder
+  const toggleReminder = async () => {
+    if (!reminderActive) {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        if (Notification.permission !== "granted") {
+          const perm = await Notification.requestPermission();
+          setNotifPermission(perm);
+          if (perm !== "granted") {
+            toast("Notifications were blocked in your browser settings", "info");
+            return;
+          }
+        }
+      }
+      setReminderActive(true);
+      toast(`🔔 Daily practice reminder set for ${reminderTime}`);
+      try {
+        localStorage.setItem(
+          "bodhi-habit-reminder",
+          JSON.stringify({ enabled: true, time: reminderTime })
+        );
+      } catch {}
+    } else {
+      setReminderActive(false);
+      toast("Daily reminders turned off");
+      try {
+        localStorage.setItem(
+          "bodhi-habit-reminder",
+          JSON.stringify({ enabled: false, time: reminderTime })
+        );
+      } catch {}
+    }
+  };
+
+  const updateReminderTime = (val: string) => {
+    setReminderTime(val);
+    try {
+      localStorage.setItem(
+        "bodhi-habit-reminder",
+        JSON.stringify({ enabled: reminderActive, time: val })
+      );
+    } catch {}
+    toast(`Reminder updated to ${val}`);
+  };
+
+  const testReminder = () => {
+    unlockAudio();
+    playBell(6, 0.5, 432, "tibetan");
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification("Bodhi Sanctuary", {
+        body: `Time for your daily sit: "${habits[0]?.title || "Sit for 10 minutes"}"`,
+        icon: "/icon.svg",
+      });
+    }
+    toast("🔔 Test chime sounded! (Tibetan Singing Bowl)");
+  };
+
   const completedTodayCount = habits.filter((h) =>
     h.completedDates.includes(todayStr)
   ).length;
 
+  // 7-day completion chart metrics
+  const chartData = useMemo(() => {
+    const totalHabits = Math.max(1, habits.length);
+    let totalCompletionsInWeek = 0;
+
+    const days = last7Days.map((d) => {
+      const completedCount = habits.filter((h) =>
+        h.completedDates.includes(d.dateStr)
+      ).length;
+      totalCompletionsInWeek += completedCount;
+      const pct = Math.min(100, Math.round((completedCount / totalHabits) * 100));
+      return {
+        ...d,
+        count: completedCount,
+        total: habits.length,
+        pct,
+      };
+    });
+
+    const weeklyPossible = habits.length * 7;
+    const weeklyRate = weeklyPossible > 0 ? Math.round((totalCompletionsInWeek / weeklyPossible) * 100) : 0;
+
+    return {
+      days,
+      totalCompletionsInWeek,
+      weeklyRate,
+    };
+  }, [habits, last7Days]);
+
   return (
-    <section className="relative overflow-hidden rounded-[2.25rem] border border-amber-900/15 bg-gradient-to-b from-white/90 via-amber-50/40 to-white/80 p-6 shadow-sm backdrop-blur md:p-8">
+    <section className="relative overflow-hidden rounded-[2.25rem] border border-amber-900/15 bg-gradient-to-b from-white/95 via-amber-50/40 to-white/90 p-6 shadow-sm backdrop-blur md:p-8">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -251,23 +362,160 @@ export default function HabitsSection() {
             Daily Meditation Habits
           </h2>
           <p className="mt-1 max-w-xl text-sm leading-relaxed text-stone-600">
-            Build unshakeable steadiness. Define a daily goal, check it off after each sit, and watch your practice thread strengthen unbroken.
+            Build unshakeable steadiness. Define a daily goal, check it off after each sit, and track your 7-day consistency thread.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAdding((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-bold text-amber-50 shadow-sm transition hover:bg-amber-900 hover:shadow"
-        >
-          <span>{isAdding ? "✕ Close" : "+ New Habit"}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsAdding((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-bold text-amber-50 shadow-sm transition hover:bg-amber-900 hover:shadow"
+          >
+            <span>{isAdding ? "✕ Close" : "+ New Habit"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 7-DAY COMPLETION TREND BAR CHART VISUALIZATION */}
+      <div className="mt-6 overflow-hidden rounded-2xl border border-amber-900/10 bg-white/80 p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 pb-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-stone-900">
+              7-Day Practice Consistency Trend
+            </h3>
+            <p className="text-xs text-stone-500">
+              Completion rate across all daily commitments over the past week
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-100/70 px-3 py-1 text-xs font-bold text-emerald-800">
+              {chartData.weeklyRate}% week consistency
+            </span>
+            <span className="text-xs font-medium text-stone-500">
+              ({chartData.totalCompletionsInWeek} sittings)
+            </span>
+          </div>
+        </div>
+
+        {/* Bar Chart */}
+        <div className="mt-5 flex h-36 items-end justify-between gap-2 px-1 sm:gap-4 md:px-4" role="img" aria-label="7-day meditation habit completion trend">
+          {chartData.days.map((d) => {
+            const hasData = d.count > 0;
+            const barHeightPct = Math.max(8, d.pct);
+
+            return (
+              <div
+                key={d.dateStr}
+                className="group flex flex-1 flex-col items-center gap-2"
+                title={`${d.fullDate}: ${d.count} of ${d.total} habits completed (${d.pct}%)`}
+              >
+                {/* Count tooltip indicator */}
+                <span className="text-[0.68rem] font-bold tabular-nums text-stone-600 transition group-hover:text-amber-900">
+                  {d.count > 0 ? `${d.count}` : "—"}
+                </span>
+
+                {/* Bar pillar */}
+                <div className="relative flex h-24 w-full max-w-[42px] items-end justify-center rounded-xl bg-stone-100/80 p-1">
+                  <div
+                    className={`w-full rounded-lg transition-all duration-500 ${
+                      d.pct >= 100
+                        ? "bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm"
+                        : hasData
+                        ? "bg-gradient-to-t from-amber-600 to-amber-400"
+                        : "bg-transparent"
+                    }`}
+                    style={{ height: `${barHeightPct}%` }}
+                  />
+                </div>
+
+                {/* Day label */}
+                <div className="text-center">
+                  <span
+                    className={`block text-[0.72rem] font-semibold leading-tight ${
+                      d.dateStr === todayStr
+                        ? "font-bold text-amber-900 underline decoration-amber-600 decoration-2 underline-offset-2"
+                        : "text-stone-500"
+                    }`}
+                  >
+                    {d.label}
+                  </span>
+                  <span className="hidden text-[0.6rem] text-stone-400 sm:block">
+                    {d.fullDate}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* DAILY NOTIFICATION REMINDER TOGGLE & TIME PICKER */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-900/10 bg-amber-50/50 p-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-200/60 text-lg">
+            🔔
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-stone-900">
+              Daily Practice Reminder
+            </p>
+            <p className="text-xs text-stone-500">
+              {reminderActive
+                ? `Prompt scheduled for ${reminderTime} daily with sacred bowl chime`
+                : "Turn on to receive a quiet daily mindfulness alert"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {reminderActive && (
+            <div className="flex items-center gap-2">
+              <label htmlFor="reminder-time-input" className="text-xs font-medium text-stone-500">
+                At:
+              </label>
+              <input
+                id="reminder-time-input"
+                type="time"
+                value={reminderTime}
+                onChange={(e) => updateReminderTime(e.target.value)}
+                className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-bold text-stone-800 shadow-xs outline-none focus:border-amber-700"
+              />
+              <button
+                type="button"
+                onClick={testReminder}
+                className="rounded-lg border border-amber-800/20 bg-white/80 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                title="Test reminder chime & notification"
+              >
+                Test 🔔
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={toggleReminder}
+            aria-pressed={reminderActive}
+            className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition shadow-xs ${
+              reminderActive
+                ? "bg-emerald-600 text-white"
+                : "border border-stone-300 bg-white text-stone-700 hover:border-amber-700"
+            }`}
+          >
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                reminderActive ? "bg-white" : "bg-stone-300"
+              }`}
+            />
+            <span>{reminderActive ? "Reminders Active" : "Enable Reminder"}</span>
+          </button>
+        </div>
       </div>
 
       {/* New Habit Form Accordion */}
       {isAdding && (
         <form
           onSubmit={handleAdd}
-          className="animate-fade-up mt-6 rounded-2xl border border-amber-900/15 bg-white/95 p-5 shadow-xs"
+          className="animate-fade-up mt-5 rounded-2xl border border-amber-900/15 bg-white/95 p-5 shadow-xs"
         >
           <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
             Define Daily Intention
@@ -421,7 +669,7 @@ export default function HabitsSection() {
                             }`}
                           />
                           <span className="text-[0.6rem] font-bold text-stone-400">
-                            {d.label}
+                            {d.label[0]}
                           </span>
                         </div>
                       );
