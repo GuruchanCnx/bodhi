@@ -1,0 +1,10 @@
+{
+  "name": "Bodhi — Buddhist Meditation Sanctuary",
+  "short_name": "Bodhi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf6ee",
+  "theme_color": "#b45309",
+  "description": "1,040 guided meditations, bowl timer, Dhamma, journal, agentic guide.",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

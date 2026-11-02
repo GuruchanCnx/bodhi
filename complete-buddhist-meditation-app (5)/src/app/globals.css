@@ -1,0 +1,418 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cormorant Garamond", "Georgia", serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-ios: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* ============ TOKENS — Dawn (light) ============ */
+:root {
+  color-scheme: light;
+  --bg: #faf6ee;
+  --bg-soft: #f4ecdc;
+  --ink: #1c1917;
+  --ink-2: #57534e;
+  --ink-3: #a8a29e;
+  --accent: #b45309;
+  --accent-2: #d97706;
+
+  /* liquid glass — dawn */
+  --glass-bg: linear-gradient(135deg, rgba(255,255,255,0.72), rgba(255,251,235,0.48));
+  --glass-bg-solid: rgba(255,255,255,0.82);
+  --glass-strong: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,251,235,0.72));
+  --glass-border: rgba(255,255,255,0.65);
+  --glass-border-soft: rgba(180,83,9,0.14);
+  --glass-shadow: 0 8px 32px rgba(120,70,10,0.10), 0 2px 8px rgba(28,25,23,0.06);
+  --glass-shadow-lg: 0 24px 64px rgba(120,70,10,0.16), 0 4px 16px rgba(28,25,23,0.08);
+  --glass-inset: inset 0 1px 0 rgba(255,255,255,0.85), inset 0 -1px 0 rgba(120,70,10,0.06);
+  --nav-bg: rgba(250,246,238,0.55);
+  --card-bg: rgba(255,255,255,0.66);
+  --chip-bg: rgba(255,255,255,0.6);
+  --field-bg: rgba(255,255,255,0.7);
+  --overlay: rgba(28,25,23,0.35);
+  --grain-opacity: 1;
+}
+
+/* ============ TOKENS — Dusk (dark) ============ */
+html.dusk, html[data-theme="dusk"] {
+  color-scheme: dark;
+  --bg: #0e0c0a;
+  --bg-soft: #161310;
+  --ink: #f2e9d8;
+  --ink-2: #c9bda6;
+  --ink-3: #8a7f6d;
+  --accent: #f59e0b;
+  --accent-2: #fbbf24;
+
+  --glass-bg: linear-gradient(135deg, rgba(42,37,31,0.62), rgba(22,19,16,0.52));
+  --glass-bg-solid: rgba(28,25,23,0.86);
+  --glass-strong: linear-gradient(135deg, rgba(52,46,38,0.82), rgba(28,25,23,0.72));
+  --glass-border: rgba(255,255,255,0.14);
+  --glass-border-soft: rgba(255,255,255,0.09);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35);
+  --glass-shadow-lg: 0 24px 64px rgba(0,0,0,0.55), 0 4px 16px rgba(0,0,0,0.4);
+  --glass-inset: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(0,0,0,0.35);
+  --nav-bg: rgba(14,12,10,0.55);
+  --card-bg: rgba(30,26,22,0.6);
+  --chip-bg: rgba(255,255,255,0.07);
+  --field-bg: rgba(255,255,255,0.06);
+  --overlay: rgba(0,0,0,0.55);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+  transition: background 0.6s var(--ease-spring), color 0.4s ease;
+  min-height: 100dvh;
+}
+
+.font-display { font-family: var(--font-display); }
+
+/* ============ AMBIENT BACKDROP (what glass refracts) ============ */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+}
+.ambient-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.55;
+  will-change: transform;
+  animation: ambient-drift 26s ease-in-out infinite alternate;
+}
+html:not(.dusk) .ambient-dusk-only { opacity: 0; }
+html.dusk .ambient-dawn-only { opacity: 0; }
+@keyframes ambient-drift {
+  0% { transform: translate(0,0) scale(1); }
+  50% { transform: translate(4vw,-3vh) scale(1.12); }
+  100% { transform: translate(-3vw,3vh) scale(0.95); }
+}
+
+/* ============ LIQUID GLASS PRIMITIVES (iOS 27) ============ */
+.liquid {
+  position: relative;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(26px) saturate(1.7) brightness(1.04);
+  backdrop-filter: blur(26px) saturate(1.7) brightness(1.04);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-inset), var(--glass-shadow);
+  transition: transform 0.5s var(--ease-spring), box-shadow 0.5s var(--ease-spring), background 0.5s ease, border-color 0.4s ease;
+}
+/* specular top sheen — the liquid highlight */
+.liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 18%, transparent 32%);
+  opacity: 0.9;
+}
+html.dusk .liquid::after {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.03) 18%, transparent 32%);
+}
+.liquid-strong {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8) brightness(1.05);
+  backdrop-filter: blur(32px) saturate(1.8) brightness(1.05);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-inset), var(--glass-shadow-lg);
+}
+/* floating nav pill */
+.liquid-nav {
+  background: var(--nav-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  backdrop-filter: blur(28px) saturate(1.8);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-inset), 0 12px 40px rgba(28,25,23,0.12);
+  transition: transform 0.5s var(--ease-spring), box-shadow 0.4s ease, background 0.5s ease;
+}
+html.dusk .liquid-nav {
+  box-shadow: var(--glass-inset), 0 12px 40px rgba(0,0,0,0.5);
+}
+.liquid-nav.scrolled {
+  transform: translateY(0) scale(0.985);
+  box-shadow: var(--glass-inset), 0 18px 48px rgba(28,25,23,0.16);
+}
+/* cards: content stays legible — higher opacity, Apple rule */
+.liquid-card {
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-inset), var(--glass-shadow);
+}
+/* chips / pills */
+.liquid-chip {
+  background: var(--chip-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  backdrop-filter: blur(16px) saturate(1.6);
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 10px rgba(28,25,23,0.06);
+}
+/* fields */
+.liquid-field {
+  background: var(--field-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid var(--glass-border-soft);
+}
+/* prominent CTA — iOS glassProminent */
+.liquid-prominent {
+  background: linear-gradient(135deg, #292018 0%, #4a2f0e 60%, #7c3f0c 100%);
+  color: #fef3c7;
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -2px 6px rgba(0,0,0,0.3), 0 12px 32px rgba(120,60,5,0.35);
+}
+html.dusk .liquid-prominent {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #92400e 100%);
+  color: #1c1005;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px rgba(245,158,11,0.3);
+}
+/* squircle radii */
+.squircle { border-radius: 26px; }
+.squircle-lg { border-radius: 32px; }
+.pill { border-radius: 999px; }
+
+/* spring press — haptic-like */
+.pressable { transition: transform 0.45s var(--ease-spring), box-shadow 0.35s ease, background 0.3s ease, border-color 0.3s ease; }
+.pressable:active { transform: scale(0.96); transition-duration: 0.12s; }
+@media (hover:hover) {
+  .lift:hover { transform: translateY(-3px) scale(1.01); }
+}
+
+/* iOS segmented */
+.liquid-segment {
+  background: var(--chip-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--glass-border-soft);
+  border-radius: 999px;
+  padding: 4px;
+  display: inline-flex;
+  gap: 2px;
+  box-shadow: inset 0 1px 2px rgba(28,25,23,0.06);
+}
+
+/* ============ LIQUIDIZE LEGACY CARDS — dawn glass too ============ */
+html:not(.dusk) main [class*="bg-white"]:not(.keep-solid):not(input):not(textarea):not(select) {
+  background: var(--card-bg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border-color: var(--glass-border-soft) !important;
+  box-shadow: var(--glass-inset), var(--glass-shadow);
+}
+/* keep type legible on glass */
+html:not(.dusk) main [class*="bg-white"] input,
+html:not(.dusk) main [class*="bg-white"] textarea {
+  background: rgba(255,255,255,0.75) !important;
+}
+
+/* ============ DUSK READABILITY — adapt legacy solid surfaces ============ */
+html.dusk body { background: var(--bg); color: var(--ink); }
+html.dusk .bg-white\/70, html.dusk .bg-white\/60, html.dusk [class*="bg-white"] {
+  /* keep Tailwind whites from blinding — soften via filter on key shells only */
+}
+html.dusk .paper-grain { opacity: 0.35; }
+/* cards authored as bg-white become dark glass automatically */
+html.dusk main [class*="bg-white"]:not(.keep-light) {
+  background: var(--card-bg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border-color: rgba(255,255,255,0.09) !important;
+  color: var(--ink);
+}
+html.dusk main [class*="text-stone-900"], html.dusk main [class*="text-stone-950"] { color: var(--ink) !important; }
+html.dusk main [class*="text-stone-600"], html.dusk main [class*="text-stone-500"] { color: var(--ink-2) !important; }
+html.dusk main [class*="text-stone-400"] { color: var(--ink-3) !important; }
+html.dusk main [class*="bg-stone-100"], html.dusk main [class*="bg-stone-50"] { background: rgba(255,255,255,0.07) !important; }
+html.dusk main [class*="border-stone-200"], html.dusk main [class*="border-stone-100"] { border-color: rgba(255,255,255,0.1) !important; }
+html.dusk main [class*="bg-amber-50"], html.dusk main [class*="bg-amber-100"] { background: rgba(245,158,11,0.12) !important; }
+html.dusk main [class*="text-amber-900"], html.dusk main [class*="text-amber-800"] { color: #fcd34d !important; }
+html.dusk .skeleton { background: linear-gradient(90deg, #2a251f 25%, #3a332a 50%, #2a251f 75%); background-size: 800px 100%; }
+
+/* ============ Motion ============ */
+@keyframes breathe { 0%,100% { transform: scale(1); opacity:.85 } 50% { transform: scale(1.22); opacity:1 } }
+@keyframes ripple { 0% { transform: scale(.8); opacity:.55 } 100% { transform: scale(1.6); opacity:0 } }
+@keyframes float-slow { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-12px) } }
+@keyframes mandala-spin { to { transform: rotate(360deg) } }
+@keyframes fade-up { from { opacity:0; transform: translateY(16px) scale(.99) } to { opacity:1; transform: translateY(0) scale(1) } }
+@keyframes petal-fall {
+  0% { transform: translate3d(0,-10vh,0) rotate(0deg); opacity:0 }
+  10% { opacity:.55 } 90% { opacity:.4 }
+  100% { transform: translate3d(2vw,105vh,0) rotate(320deg); opacity:0 }
+}
+@keyframes shimmer { 0% { background-position:-400px 0 } 100% { background-position:400px 0 } }
+@keyframes sheet-up { from { opacity:0; transform: translateY(28px) scale(.98) } to { opacity:1; transform: translateY(0) scale(1) } }
+@keyframes glow-pulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
+
+.animate-fade-up { animation: fade-up .6s var(--ease-spring) both; }
+.animate-sheet-up { animation: sheet-up .55s var(--ease-spring) both; }
+.animate-float-slow { animation: float-slow 7s ease-in-out infinite; will-change: transform; }
+.animate-mandala { animation: mandala-spin 90s linear infinite; will-change: transform; }
+.breath-orb { animation: breathe var(--breath-cycle,8s) ease-in-out infinite; will-change: transform,opacity; }
+.breath-ripple { animation: ripple var(--breath-cycle,8s) ease-out infinite; will-change: transform,opacity; }
+.skeleton { background: linear-gradient(90deg,#e9e0cd 25%,#f7f1e3 50%,#e9e0cd 75%); background-size:800px 100%; animation: shimmer 1.4s linear infinite; }
+
+.cv-auto { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+.gpu { transform: translateZ(0); }
+
+.paper-grain {
+  background-image: radial-gradient(rgba(120,90,40,0.06) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+html.dusk .paper-grain {
+  background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+}
+
+.ensō-ring {
+  background: conic-gradient(from 20deg, #d97706, #92400e, #f59e0b, #78350f, #d97706);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 14px), black calc(100% - 12px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 14px), black calc(100% - 12px));
+  opacity: .85;
+}
+
+::selection { background: #f59e0b55; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.skip-link {
+  position: fixed; left:12px; top:-60px; z-index:100;
+  background:#1c1917; color:#fef3c7; padding:10px 18px; border-radius:999px;
+  font-size:13px; font-weight:700; transition: top .25s var(--ease-spring);
+}
+.skip-link:focus { top:12px; }
+
+*::-webkit-scrollbar { width:8px; height:8px }
+*::-webkit-scrollbar-thumb { background:#d6c7a8; border-radius:8px }
+html.dusk *::-webkit-scrollbar-thumb { background:#4a4238 }
+*::-webkit-scrollbar-track { background:transparent }
+
+/* iOS spring on all sanctuary cards */
+main a[class*="rounded-3xl"], main article[class*="rounded-3xl"], main div[class*="rounded-[2rem]"] {
+  transition: transform 0.5s var(--ease-spring), box-shadow 0.4s ease, background 0.4s ease, border-color 0.3s ease;
+}
+@media (hover:hover) {
+  main a[class*="rounded-3xl"]:hover, main article[class*="rounded-3xl"]:hover { transform: translateY(-3px); }
+}
+
+/* Large iOS title */
+.ios-title { letter-spacing:-0.02em; font-weight:700; }
+
+/* Reduce transparency — first-class citizen */
+@media (prefers-reduced-transparency: reduce) {
+  .liquid, .liquid-strong, .liquid-nav, .liquid-card, .liquid-chip, .liquid-field {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--bg);
+  }
+  .liquid::after { display:none; }
+  .ambient { display:none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto }
+  *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+  .animate-mandala,.breath-orb,.breath-ripple,.ambient-blob { animation:none !important; }
+}
+
+/* ================= FOLDABLE / APPLE DUO — viewport segments ================= */
+/* Hinge gap (0px on normal devices, fold width on dual screens) */
+:root {
+  --fold-gap: calc(env(fold-safe-area-inset-left, 0px) + env(fold-safe-area-inset-right, 0px) + env(fold-safe-area-inset-top, 0px) + env(fold-safe-area-inset-bottom, 0px));
+  --fold-pad: max(0px, env(fold-safe-area-inset-left, 0px), env(fold-safe-area-inset-right, 0px));
+}
+
+/* Content never straddles the hinge */
+.anti-hinge { padding-inline: var(--fold-pad); }
+
+/* Practice hall: left screen = timer + controls, right screen = guidance */
+@media (horizontal-viewport-segments: 2) {
+  .practice-grid {
+    grid-template-columns: 1fr 1fr !important;
+    column-gap: calc(var(--fold-gap) + 28px);
+    align-items: start;
+  }
+  .practice-grid > :nth-child(1) { grid-column: 1; grid-row: 2; }   /* setup */
+  .practice-grid > :nth-child(2) { grid-column: 1; grid-row: 1; }   /* timer */
+  .practice-grid > :nth-child(3) { grid-column: 2; grid-row: 1 / span 2; } /* guidance */
+  .practice-grid > * { min-width: 0; }
+}
+@media (vertical-viewport-segments: 2) {
+  .practice-grid {
+    grid-template-columns: 1fr !important;
+    row-gap: calc(var(--fold-gap) + 28px);
+  }
+  .practice-grid > :nth-child(3) { grid-column: 1; grid-row: 3; }
+}
+
+/* Library / journal grids: denser columns, hinge-safe gutters */
+@media (horizontal-viewport-segments: 2) {
+  .library-grid { grid-template-columns: repeat(2, 1fr) !important; column-gap: calc(var(--fold-gap) + 20px); }
+  .dual-h { grid-template-columns: 1fr 1fr !important; column-gap: calc(var(--fold-gap) + 28px); }
+}
+@media (vertical-viewport-segments: 2) {
+  .library-grid { grid-template-columns: repeat(2, 1fr) !important; row-gap: calc(var(--fold-gap) + 20px); }
+  .dual-h { grid-template-columns: 1fr !important; row-gap: calc(var(--fold-gap) + 28px); }
+}
+
+/* Wide desktop / Stage Manager: same two-pane behavior without a hinge */
+@media (min-width: 1280px) {
+  .dual-h { grid-template-columns: 1fr 1fr !important; }
+}
+
+/* ================= Split pane (drag handle) ================= */
+.split-pane {
+  display: grid;
+  grid-template-columns: var(--split, 42%) 10px 1fr;
+  gap: 0;
+  width: 100%;
+}
+.split-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transition: background 0.25s ease;
+  outline-offset: 4px;
+}
+.split-handle:hover, .split-handle:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.split-grip {
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+@media (max-width: 900px) {
+  .split-pane { grid-template-columns: 1fr !important; grid-template-rows: auto 14px auto; }
+  .split-handle { width: 44px; height: 14px; justify-self: center; }
+  .split-grip { width: 44px; height: 4px; }
+}
+
+/* Floating UI (FAB, tabs) avoids the hinge band on foldables */
+@media (horizontal-viewport-segments: 2) {
+  .hinge-avoid-right { right: max(1rem, env(fold-safe-area-inset-right, 0px)); }
+}
+
+/* ================= Product polish ================= */
+html { -webkit-tap-highlight-color: transparent; }
+::placeholder { opacity: 0.55; }
+a, button, summary { touch-action: manipulation; }
