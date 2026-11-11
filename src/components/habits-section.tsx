@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { motion, AnimatePresence } from "motion/react";
 import { useToast } from "@/components/chrome";
 import { playBell, unlockAudio } from "@/lib/audio";
+import { ConfettiBurstOverlay } from "@/components/confetti-burst";
+import { exportAsPdf, exportAsPng, HabitTrendExportData } from "@/lib/habit-export";
 
 export interface HabitItem {
   id: string;
@@ -51,6 +54,11 @@ export default function HabitsSection() {
   const [newMinutes, setNewMinutes] = useState(10);
   const [isAdding, setIsAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [justCompletedId, setJustCompletedId] = useState<string | null>(null);
+
+  // Confetti bursts
+  const [bursts, setBursts] = useState<{ id: string; x: number; y: number }[]>([]);
 
   // Daily notification state
   const [reminderActive, setReminderActive] = useState(false);
@@ -58,6 +66,7 @@ export default function HabitsSection() {
   const [notifPermission, setNotifPermission] = useState<string>("default");
 
   const toast = useToast();
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -91,6 +100,21 @@ export default function HabitsSection() {
       }
     } catch {}
   }, []);
+
+  // Close export dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    if (exportOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [exportOpen]);
 
   // Load habits from API / Firestore or fallback to localStorage
   useEffect(() => {
@@ -136,8 +160,37 @@ export default function HabitsSection() {
     };
   }, []);
 
-  // Toggle completion for today
-  const toggleToday = async (habit: HabitItem) => {
+  // 7-day completion chart metrics
+  const chartData = useMemo(() => {
+    const totalHabits = Math.max(1, habits.length);
+    let totalCompletionsInWeek = 0;
+
+    const days = last7Days.map((d) => {
+      const completedCount = habits.filter((h) =>
+        h.completedDates.includes(d.dateStr)
+      ).length;
+      totalCompletionsInWeek += completedCount;
+      const pct = Math.min(100, Math.round((completedCount / totalHabits) * 100));
+      return {
+        ...d,
+        count: completedCount,
+        total: habits.length,
+        pct,
+      };
+    });
+
+    const weeklyPossible = habits.length * 7;
+    const weeklyRate = weeklyPossible > 0 ? Math.round((totalCompletionsInWeek / weeklyPossible) * 100) : 0;
+
+    return {
+      days,
+      totalCompletionsInWeek,
+      weeklyRate,
+    };
+  }, [habits, last7Days]);
+
+  // Toggle completion for today with micro-interaction + confetti burst + Tibetan bell
+  const toggleToday = async (habit: HabitItem, e: React.MouseEvent<HTMLButtonElement>) => {
     const isDone = habit.completedDates.includes(todayStr);
     const updatedDates = isDone
       ? habit.completedDates.filter((d) => d !== todayStr)
@@ -169,8 +222,28 @@ export default function HabitsSection() {
     } catch {}
 
     if (!isDone) {
+      // Trigger Satisfying Micro-Interactions:
+      // 1. Confetti Burst at button coordinates
+      const rect = e.currentTarget.getBoundingClientRect();
+      const originX = rect.left + rect.width / 2;
+      const originY = rect.top + rect.height / 2;
+      setBursts((prev) => [...prev, { id: `burst-${Date.now()}`, x: originX, y: originY }]);
+
+      // 2. Button Scale Pop State
+      setJustCompletedId(habit.id);
+      setTimeout(() => setJustCompletedId(null), 800);
+
+      // 3. Sacred Tibetan Bowl Chime (with mobile unlock)
       unlockAudio();
-      playBell(4, 0.4, 432, "tibetan");
+      playBell(4.5, 0.5, 432, "tibetan");
+
+      // 4. Haptic vibration feedback for mobile
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        try {
+          navigator.vibrate([20, 35, 20]);
+        } catch {}
+      }
+
       toast(`✦ Completed: “${habit.title}” · ${streak}-day streak!`);
     } else {
       toast("Habit unmarked for today");
@@ -190,6 +263,10 @@ export default function HabitsSection() {
     } catch (err) {
       console.warn("Could not sync toggle to server:", err);
     }
+  };
+
+  const handleClearBurst = (id: string) => {
+    setBursts((curr) => curr.filter((b) => b.id !== id));
   };
 
   // Add new habit
@@ -305,7 +382,7 @@ export default function HabitsSection() {
 
   const testReminder = () => {
     unlockAudio();
-    playBell(6, 0.5, 432, "tibetan");
+    playBell(6, 0.55, 432, "tibetan");
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
       new Notification("Bodhi Sanctuary", {
         body: `Time for your daily sit: "${habits[0]?.title || "Sit for 10 minutes"}"`,
@@ -315,41 +392,50 @@ export default function HabitsSection() {
     toast("🔔 Test chime sounded! (Tibetan Singing Bowl)");
   };
 
+  // Export handlers
+  const handleExportPng = () => {
+    setExportOpen(false);
+    const exportData: HabitTrendExportData = {
+      weeklyRate: chartData.weeklyRate,
+      totalCompletionsInWeek: chartData.totalCompletionsInWeek,
+      days: chartData.days,
+      habits: habits.map((h) => ({
+        title: h.title,
+        targetMinutes: h.targetMinutes,
+        streak: h.streak,
+        completedToday: h.completedDates.includes(todayStr),
+      })),
+    };
+    exportAsPng(exportData, `bodhi-habit-trend-${todayStr}.png`);
+    toast("🖼️ 7-Day Consistency chart exported as high-res PNG!");
+  };
+
+  const handleExportPdf = () => {
+    setExportOpen(false);
+    const exportData: HabitTrendExportData = {
+      weeklyRate: chartData.weeklyRate,
+      totalCompletionsInWeek: chartData.totalCompletionsInWeek,
+      days: chartData.days,
+      habits: habits.map((h) => ({
+        title: h.title,
+        targetMinutes: h.targetMinutes,
+        streak: h.streak,
+        completedToday: h.completedDates.includes(todayStr),
+      })),
+    };
+    exportAsPdf(exportData, `bodhi-habit-trend-${todayStr}.pdf`);
+    toast("📄 7-Day Consistency chart exported as PDF document!");
+  };
+
   const completedTodayCount = habits.filter((h) =>
     h.completedDates.includes(todayStr)
   ).length;
 
-  // 7-day completion chart metrics
-  const chartData = useMemo(() => {
-    const totalHabits = Math.max(1, habits.length);
-    let totalCompletionsInWeek = 0;
-
-    const days = last7Days.map((d) => {
-      const completedCount = habits.filter((h) =>
-        h.completedDates.includes(d.dateStr)
-      ).length;
-      totalCompletionsInWeek += completedCount;
-      const pct = Math.min(100, Math.round((completedCount / totalHabits) * 100));
-      return {
-        ...d,
-        count: completedCount,
-        total: habits.length,
-        pct,
-      };
-    });
-
-    const weeklyPossible = habits.length * 7;
-    const weeklyRate = weeklyPossible > 0 ? Math.round((totalCompletionsInWeek / weeklyPossible) * 100) : 0;
-
-    return {
-      days,
-      totalCompletionsInWeek,
-      weeklyRate,
-    };
-  }, [habits, last7Days]);
-
   return (
     <section className="relative overflow-hidden rounded-[2.25rem] border border-amber-900/15 bg-gradient-to-b from-white/95 via-amber-50/40 to-white/90 p-6 shadow-sm backdrop-blur md:p-8">
+      {/* Confetti Overlay */}
+      <ConfettiBurstOverlay bursts={bursts} onClear={handleClearBurst} />
+
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -367,6 +453,55 @@ export default function HabitsSection() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Export Dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setExportOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3.5 py-2 text-xs font-bold text-stone-700 shadow-xs transition hover:border-amber-700 hover:text-amber-900"
+              aria-expanded={exportOpen}
+              aria-haspopup="true"
+            >
+              <span>📥 Export Trend</span>
+              <span className="text-[0.65rem] text-stone-400">▼</span>
+            </button>
+
+            <AnimatePresence>
+              {exportOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 z-30 mt-2 w-56 rounded-2xl border border-amber-900/15 bg-white p-2 shadow-xl ring-1 ring-black/5"
+                >
+                  <p className="px-3 py-1.5 text-[0.68rem] font-bold uppercase tracking-wider text-amber-900">
+                    Export 7-Day Trend Chart
+                  </p>
+                  <button
+                    onClick={handleExportPng}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-semibold text-stone-700 transition hover:bg-amber-50 hover:text-amber-900"
+                  >
+                    <span className="text-base">🖼️</span>
+                    <div>
+                      <span className="block font-bold">Export as PNG</span>
+                      <span className="text-[0.65rem] text-stone-400">High-res retina image</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleExportPdf}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-semibold text-stone-700 transition hover:bg-amber-50 hover:text-amber-900"
+                  >
+                    <span className="text-base">📄</span>
+                    <div>
+                      <span className="block font-bold">Export as PDF</span>
+                      <span className="text-[0.65rem] text-stone-400">Printable document</span>
+                    </div>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             onClick={() => setIsAdding((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-full bg-stone-900 px-4 py-2 text-xs font-bold text-amber-50 shadow-sm transition hover:bg-amber-900 hover:shadow"
@@ -591,6 +726,7 @@ export default function HabitsSection() {
         ) : (
           habits.map((habit) => {
             const isCompletedToday = habit.completedDates.includes(todayStr);
+            const isPop = justCompletedId === habit.id;
 
             return (
               <div
@@ -603,17 +739,42 @@ export default function HabitsSection() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
-                    <button
-                      onClick={() => toggleToday(habit)}
+                    {/* Micro-interaction Spring Pop Button */}
+                    <motion.button
+                      onClick={(e) => toggleToday(habit, e)}
+                      animate={
+                        isPop
+                          ? {
+                              scale: [1, 1.35, 0.9, 1.15, 1],
+                              rotate: [0, 8, -6, 2, 0],
+                            }
+                          : { scale: 1, rotate: 0 }
+                      }
+                      transition={{ duration: 0.5, ease: "easeOut" }}
+                      whileTap={{ scale: 0.88 }}
                       aria-label={`Toggle completion for ${habit.title}`}
-                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl border text-base font-bold transition-transform active:scale-90 ${
+                      className={`relative grid h-8 w-8 shrink-0 place-items-center rounded-xl border text-base font-bold transition shadow-xs ${
                         isCompletedToday
-                          ? "border-emerald-600 bg-emerald-600 text-white shadow-xs"
-                          : "border-stone-300 bg-white text-transparent hover:border-amber-700"
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-stone-300 bg-white text-transparent hover:border-amber-700 hover:text-stone-300"
                       }`}
                     >
-                      ✓
-                    </button>
+                      {/* Checkmark icon with spring scale */}
+                      <motion.span
+                        key={String(isCompletedToday)}
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                      >
+                        ✓
+                      </motion.span>
+
+                      {/* Ripple ring on complete */}
+                      {isPop && (
+                        <span className="pointer-events-none absolute inset-0 animate-ping rounded-xl border-2 border-emerald-400 opacity-75" />
+                      )}
+                    </motion.button>
+
                     <div>
                       <h3
                         className={`text-sm font-semibold leading-snug ${

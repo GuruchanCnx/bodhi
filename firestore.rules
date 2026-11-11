@@ -17,12 +17,14 @@ service cloud.firestore {
 
     // Health and connection check
     match /test/{testId} {
-      allow read, write: if isValidId(testId);
+      allow get: if isValidId(testId);
+      allow list, create, update, delete: if true;
     }
 
     // Meditation sessions
     match /meditation_sessions/{sessionId} {
-      allow read: if isValidId(sessionId);
+      allow get: if isValidId(sessionId);
+      allow list: if true;
       allow create: if isValidId(sessionId)
         && incoming().technique is string && incoming().technique.size() <= 80
         && incoming().title is string && incoming().title.size() <= 160
@@ -37,7 +39,8 @@ service cloud.firestore {
 
     // Journal reflections
     match /journal_entries/{entryId} {
-      allow read: if isValidId(entryId);
+      allow get: if isValidId(entryId);
+      allow list: if true;
       allow create: if isValidId(entryId)
         && incoming().title is string && incoming().title.size() <= 200
         && incoming().content is string && incoming().content.size() <= 10000
@@ -49,7 +52,8 @@ service cloud.firestore {
 
     // Daily habits tracker
     match /habits/{habitId} {
-      allow read: if isValidId(habitId);
+      allow get: if isValidId(habitId);
+      allow list: if true;
       allow create: if isValidId(habitId)
         && incoming().title is string && incoming().title.size() <= 120
         && incoming().targetMinutes is number
@@ -60,14 +64,17 @@ service cloud.firestore {
       allow delete: if isValidId(habitId);
     }
 
-    // Practice programs / plans
+    // Practice plans
     match /practice_plans/{planId} {
-      allow read: if isValidId(planId);
+      allow get: if isValidId(planId);
+      allow list: if true;
       allow create: if isValidId(planId)
         && incoming().title is string && incoming().title.size() <= 120
-        && incoming().active is bool
+        && incoming().goal is string
+        && incoming().minutesPerDay is number
         && incoming().createdAt is string;
-      allow update: if isValidId(planId);
+      allow update: if isValidId(planId)
+        && incoming().title is string && incoming().title.size() <= 120;
       allow delete: if isValidId(planId);
     }
   }

@@ -1,21 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider, ToastProvider } from "@/components/chrome";
 import { Ambient, MobileTabs, SiteFooter, SiteHeader } from "@/components/site-chrome";
 import SwRegister from "@/components/sw-register";
 import GuideLazy from "@/components/guide-lazy";
-
-const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-body", preload: true });
-const cormorant = Cormorant_Garamond({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  style: ["normal", "italic"],
-  display: "swap",
-  variable: "--font-display",
-  preload: false,
-});
+import OneHandNav from "@/components/one-hand-nav";
 
 export const metadata: Metadata = {
   title: { default: "Bodhi — Buddhist Meditation Sanctuary", template: "%s · Bodhi" },
@@ -59,7 +49,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${cormorant.variable}`} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -72,10 +62,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <ToastProvider>
             <Ambient />
             <SiteHeader />
-            <main id="main" className="relative z-10">
+            <main id="main" className="relative z-10 transition-transform duration-300 ease-out">
               {children}
             </main>
             <MobileTabs />
+            <OneHandNav />
             <GuideLazy />
             <SiteFooter />
           </ToastProvider>

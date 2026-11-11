@@ -5,6 +5,7 @@ import Link from "next/link";
 import { meditations } from "@/lib/content";
 import { SectionHeading, Stat } from "@/components/ui";
 import { cachedFetch, useToast } from "@/components/chrome";
+import MoodTrendChart from "@/components/mood-trend-chart";
 
 type Stats = {
   totals: { sessions: number; seconds: number; minutes: number; avgSeconds: number; days: number; streak: number; journalEntries: number };
@@ -210,6 +211,11 @@ export default function JourneyPage() {
                 Write a reflection
               </Link>
             </div>
+          </div>
+
+          {/* D3 MOOD AFTER SITTING TRAJECTORY */}
+          <div className="mt-6">
+            <MoodTrendChart sessions={sessions} />
           </div>
 
           <div className="cv-auto mt-6 rounded-3xl border border-amber-900/10 bg-white p-6">

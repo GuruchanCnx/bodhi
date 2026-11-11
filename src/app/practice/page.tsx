@@ -134,6 +134,7 @@ function PracticeInner() {
   const [voiceCues, setVoiceCues] = useLocalStorage("bodhi-voice", false);
   const [auditioningVoice, setAuditioningVoice] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [breathPulse, setBreathPulse] = useLocalStorage("bodhi-timer-breath-pulse", true);
   const [customOpen, setCustomOpen] = useState(false);
 
   const pattern = useMemo(
@@ -541,6 +542,17 @@ function PracticeInner() {
                     </p>
                   </div>
 
+                  {/* iOS / Mobile Sound Guidance */}
+                  <div className="rounded-xl border border-amber-900/10 bg-amber-50/80 p-2.5 text-[0.7rem] text-stone-600">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <span>📱</span>
+                      <span>iPhone & iPad Sound Tip</span>
+                    </div>
+                    <p className="mt-0.5 leading-relaxed text-stone-600">
+                      Ensure your side Silent/Mute switch is turned off (unmuted, no orange line) and volume is up so iOS allows bell chimes to ring.
+                    </p>
+                  </div>
+
                   {/* Ambient Soundscape */}
                   <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3">
                     <div className="flex items-center justify-between">
@@ -686,13 +698,33 @@ function PracticeInner() {
           )}
 
           {/* CENTER */}
-          <div className="overflow-hidden rounded-[2rem] border border-amber-900/15 bg-[#1c1917] text-center text-stone-200 shadow-[0_30px_80px_rgba(28,25,23,0.35)]">
+          <div
+            className={`overflow-hidden rounded-[2rem] border border-amber-900/15 bg-[#1c1917] text-center text-stone-200 shadow-[0_30px_80px_rgba(28,25,23,0.35)] transition-all duration-700 ${
+              (phase === "sitting" || phase === "paused") && breathPulse
+                ? "animate-timer-breath"
+                : ""
+            }`}
+          >
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-3">
               <div className="text-left">
                 <p className="text-[0.65rem] font-bold uppercase tracking-[0.3em] text-amber-500">{meditation.pali}</p>
                 <h2 className="font-display text-xl font-semibold leading-tight text-amber-50 md:text-2xl">{meditation.name}</h2>
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setBreathPulse((v) => !v)}
+                  className={`rounded-full px-2.5 py-1 text-[0.68rem] font-bold transition ${
+                    breathPulse
+                      ? "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40"
+                      : "bg-white/10 text-stone-400 hover:bg-white/15"
+                  }`}
+                  aria-pressed={breathPulse}
+                  title="4-4-4-4 Box Breathing visual guide (subtly expands and settles container)"
+                >
+                  <span className={breathPulse ? "animate-pulse mr-1" : "mr-1 opacity-60"}>🫁</span>
+                  4-4-4-4
+                </button>
                 <button onClick={() => setFocusMode((v) => !v)} className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold hover:bg-white/20" aria-label="Toggle focus mode" title="Focus (F)">{focusMode ? "◧ exit" : "◧ focus"}</button>
                 <button onClick={toggleFullscreen} className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold hover:bg-white/20" aria-label="Fullscreen">⛶</button>
               </div>
@@ -796,9 +828,20 @@ function PracticeInner() {
                       </>
                     )}
                   </div>
-                  <button onClick={() => { unlockAudio(); if (soundOn) playBell(5, volume, bellStyle); }} className="mt-4 text-xs font-semibold text-stone-500 hover:text-amber-300">
-                    ♪ Preview bowl · Space pauses · F focuses
-                  </button>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        unlockAudio();
+                        if (soundOn) playBell(5, volume, bellStyle);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-white/20 hover:text-amber-100"
+                    >
+                      <span>🔔 Tap to Test Sound</span>
+                    </button>
+                    <span className="text-[0.72rem] text-stone-500">Space pauses · F focuses</span>
+                  </div>
                 </>
               )}
             </div>
