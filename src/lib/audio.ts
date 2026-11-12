@@ -318,139 +318,226 @@ export const AMBIENT_OPTIONS: { id: AmbientKind; name: string; description: stri
   { id: "om_drone", name: "432Hz Om Solfeggio Drone", description: "Subtle harmonic binaural drone for deep samadhi" },
 ];
 
-export function startAmbient(kind: AmbientKind = "rain", volume = 0.05) {
+export interface AmbientTrackHandle {
+  stop: () => void;
+  setVolume: (vol: number) => void;
+  kind: AmbientKind;
+  volume: number;
+}
+
+const activeAmbientTracks: {
+  track1: AmbientTrackHandle | null;
+  track2: AmbientTrackHandle | null;
+} = {
+  track1: null,
+  track2: null,
+};
+
+function createAmbientTrackNode(
+  ac: AudioContext,
+  kind: AmbientKind,
+  initialVol: number
+): AmbientTrackHandle | null {
+  if (kind === "off") return null;
+
+  const safeVol = Math.max(0.0001, Math.min(1.0, initialVol));
+
+  if (kind === "om_drone") {
+    // 432Hz + 216Hz + 108Hz harmonic soothing drone
+    const freqs = [108, 216, 432, 434];
+    const master = ac.createGain();
+    master.gain.setValueAtTime(0.0001, ac.currentTime);
+    master.gain.linearRampToValueAtTime(safeVol * 0.65, ac.currentTime + 1.5);
+    master.connect(ac.destination);
+
+    const oscs = freqs.map((f, i) => {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = "sine";
+      osc.frequency.value = f;
+      g.gain.value = 1 / (i + 1.5);
+      osc.connect(g);
+      g.connect(master);
+      osc.start();
+      return osc;
+    });
+
+    return {
+      kind,
+      volume: safeVol,
+      setVolume: (v: number) => {
+        try {
+          const target = Math.max(0.0001, Math.min(1.0, v)) * 0.65;
+          master.gain.cancelScheduledValues(ac.currentTime);
+          master.gain.linearRampToValueAtTime(target, ac.currentTime + 0.15);
+        } catch {}
+      },
+      stop: () => {
+        try {
+          master.gain.linearRampToValueAtTime(0.0001, ac.currentTime + 0.8);
+          setTimeout(() => {
+            oscs.forEach((o) => {
+              try { o.stop(); } catch {}
+            });
+            try { master.disconnect(); } catch {}
+          }, 800);
+        } catch {}
+      },
+    };
+  }
+
+  // Noise-buffer based ambients (Rain, Creek, Forest, Brown Noise)
+  const len = ac.sampleRate * 3;
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  const left = buf.getChannelData(0);
+  const right = buf.getChannelData(1);
+
+  let lastOutL = 0.0;
+  let lastOutR = 0.0;
+
+  for (let i = 0; i < len; i++) {
+    const whiteL = Math.random() * 2 - 1;
+    const whiteR = Math.random() * 2 - 1;
+
+    if (kind === "noise") {
+      // Brown noise
+      lastOutL = (lastOutL + 0.02 * whiteL) / 1.02;
+      lastOutR = (lastOutR + 0.02 * whiteR) / 1.02;
+      left[i] = lastOutL * 3.5;
+      right[i] = lastOutR * 3.5;
+    } else if (kind === "creek") {
+      // Pink / trickle water noise
+      lastOutL = (lastOutL + 0.05 * whiteL) / 1.05;
+      lastOutR = (lastOutR + 0.05 * whiteR) / 1.05;
+      left[i] = (lastOutL + whiteL * 0.2) * 1.5;
+      right[i] = (lastOutR + whiteR * 0.2) * 1.5;
+    } else {
+      left[i] = whiteL;
+      right[i] = whiteR;
+    }
+  }
+
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+
+  const filter = ac.createBiquadFilter();
+  if (kind === "rain") {
+    filter.type = "bandpass";
+    filter.frequency.value = 1800;
+    filter.Q.value = 0.8;
+  } else if (kind === "creek") {
+    filter.type = "lowpass";
+    filter.frequency.value = 1200;
+  } else if (kind === "forest") {
+    filter.type = "highpass";
+    filter.frequency.value = 3500;
+  } else {
+    filter.type = "lowpass";
+    filter.frequency.value = 450;
+  }
+
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, ac.currentTime);
+  g.gain.linearRampToValueAtTime(safeVol, ac.currentTime + 1.2);
+
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(ac.destination);
+  src.start();
+
+  return {
+    kind,
+    volume: safeVol,
+    setVolume: (v: number) => {
+      try {
+        const target = Math.max(0.0001, Math.min(1.0, v));
+        g.gain.cancelScheduledValues(ac.currentTime);
+        g.gain.linearRampToValueAtTime(target, ac.currentTime + 0.15);
+      } catch {}
+    },
+    stop: () => {
+      try {
+        g.gain.linearRampToValueAtTime(0.0001, ac.currentTime + 0.8);
+        setTimeout(() => {
+          try { src.stop(); } catch {}
+          try { g.disconnect(); } catch {}
+        }, 800);
+      } catch {}
+    },
+  };
+}
+
+export function startAmbientTrack(
+  trackNum: 1 | 2,
+  kind: AmbientKind,
+  volume = 0.05
+): () => void {
   try {
+    const key = trackNum === 1 ? "track1" : "track2";
+    const existing = activeAmbientTracks[key];
+
     if (kind === "off") {
-      stopAmbient();
+      stopAmbientTrack(trackNum);
       return () => {};
     }
+
     const ac = getAudioContext();
     if (!ac) return () => {};
     if (ac.state === "suspended") {
       void ac.resume();
     }
-    stopAmbient();
 
-    if (kind === "om_drone") {
-      // Synthesize 432Hz + 216Hz + 108Hz harmonic soothing drone
-      const freqs = [108, 216, 432, 434]; // 2Hz beating binaural
-      const master = ac.createGain();
-      master.gain.setValueAtTime(0.0001, ac.currentTime);
-      master.gain.linearRampToValueAtTime(volume * 0.65, ac.currentTime + 2);
-      master.connect(ac.destination);
-
-      const oscs = freqs.map((f, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = "sine";
-        osc.frequency.value = f;
-        g.gain.value = 1 / (i + 1.5);
-        osc.connect(g);
-        g.connect(master);
-        osc.start();
-        return osc;
-      });
-
-      const handle = {
-        stop: () => {
-          try {
-            master.gain.linearRampToValueAtTime(0.0001, ac.currentTime + 1);
-            setTimeout(() => {
-              oscs.forEach((o) => {
-                try { o.stop(); } catch {}
-              });
-              try { master.disconnect(); } catch {}
-            }, 1000);
-          } catch {}
-        },
-      };
-      ambientNodes = handle;
-      return handle.stop;
+    // If same sound is already playing on this track, smoothly update volume
+    if (existing && existing.kind === kind) {
+      existing.setVolume(volume);
+      existing.volume = volume;
+      return () => stopAmbientTrack(trackNum);
     }
 
-    // Noise-buffer based ambients (Rain, Creek, Forest, Brown Noise)
-    const len = ac.sampleRate * 3;
-    const buf = ac.createBuffer(2, len, ac.sampleRate);
-    const left = buf.getChannelData(0);
-    const right = buf.getChannelData(1);
-
-    let lastOutL = 0.0;
-    let lastOutR = 0.0;
-
-    for (let i = 0; i < len; i++) {
-      const whiteL = Math.random() * 2 - 1;
-      const whiteR = Math.random() * 2 - 1;
-
-      if (kind === "noise") {
-        // Brown noise
-        lastOutL = (lastOutL + 0.02 * whiteL) / 1.02;
-        lastOutR = (lastOutR + 0.02 * whiteR) / 1.02;
-        left[i] = lastOutL * 3.5;
-        right[i] = lastOutR * 3.5;
-      } else if (kind === "creek") {
-        // Pink / trickle noise
-        lastOutL = (lastOutL + 0.05 * whiteL) / 1.05;
-        lastOutR = (lastOutR + 0.05 * whiteR) / 1.05;
-        left[i] = (lastOutL + whiteL * 0.2) * 1.5;
-        right[i] = (lastOutR + whiteR * 0.2) * 1.5;
-      } else {
-        left[i] = whiteL;
-        right[i] = whiteR;
-      }
+    // Stop current track before switching soundscape
+    if (existing) {
+      existing.stop();
+      activeAmbientTracks[key] = null;
     }
 
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
-
-    const filter = ac.createBiquadFilter();
-    if (kind === "rain") {
-      filter.type = "bandpass";
-      filter.frequency.value = 1800;
-      filter.Q.value = 0.8;
-    } else if (kind === "creek") {
-      filter.type = "lowpass";
-      filter.frequency.value = 1200;
-    } else if (kind === "forest") {
-      filter.type = "highpass";
-      filter.frequency.value = 3500;
-    } else {
-      filter.type = "lowpass";
-      filter.frequency.value = 450;
-    }
-
-    const g = ac.createGain();
-    g.gain.setValueAtTime(0.0001, ac.currentTime);
-    g.gain.linearRampToValueAtTime(volume, ac.currentTime + 1.5);
-
-    src.connect(filter);
-    filter.connect(g);
-    g.connect(ac.destination);
-    src.start();
-
-    const handle = {
-      stop: () => {
-        try {
-          g.gain.linearRampToValueAtTime(0.0001, ac.currentTime + 0.8);
-          setTimeout(() => {
-            try { src.stop(); } catch {}
-            try { g.disconnect(); } catch {}
-          }, 800);
-        } catch {}
-      },
-    };
-    ambientNodes = handle;
-    return handle.stop;
+    const handle = createAmbientTrackNode(ac, kind, volume);
+    activeAmbientTracks[key] = handle;
+    return () => stopAmbientTrack(trackNum);
   } catch {
     return () => {};
   }
 }
 
-export function stopAmbient() {
+export function setAmbientTrackVolume(trackNum: 1 | 2, volume: number) {
+  const key = trackNum === 1 ? "track1" : "track2";
+  const existing = activeAmbientTracks[key];
+  if (existing) {
+    existing.setVolume(volume);
+    existing.volume = volume;
+  }
+}
+
+export function stopAmbientTrack(trackNum: 1 | 2) {
   try {
-    ambientNodes?.stop();
+    const key = trackNum === 1 ? "track1" : "track2";
+    activeAmbientTracks[key]?.stop();
+    activeAmbientTracks[key] = null;
   } catch {}
-  ambientNodes = null;
+}
+
+export function stopAllAmbients() {
+  stopAmbientTrack(1);
+  stopAmbientTrack(2);
+}
+
+// Backward-compatible single-track methods
+export function startAmbient(kind: AmbientKind = "rain", volume = 0.05) {
+  return startAmbientTrack(1, kind, volume);
+}
+
+export function stopAmbient() {
+  stopAllAmbients();
 }
 
 // =================== GUIDED VOICE PERSONAS ===================

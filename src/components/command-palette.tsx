@@ -18,7 +18,7 @@ function readList(key: string): string[] {
   }
 }
 
-export default function CommandPalette() {
+export default function CommandPalette({ showButton = true }: { showButton?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [mode, setMode] = useState<"search" | "ask">("search");
@@ -41,8 +41,14 @@ export default function CommandPalette() {
       }
       if (e.key === "Escape") setOpen(false);
     };
+    const onOpenCustom = () => setOpen(true);
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("bodhi:open-search", onOpenCustom);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("bodhi:open-search", onOpenCustom);
+    };
   }, []);
 
   useEffect(() => {
@@ -129,6 +135,7 @@ export default function CommandPalette() {
   }, [q, asking, favs]);
 
   if (!open) {
+    if (!showButton) return null;
     return (
       <button
         onClick={() => setOpen(true)}

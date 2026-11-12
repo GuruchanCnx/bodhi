@@ -1,13 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { playSoftTick, unlockAudio } from "@/lib/audio";
 
+/**
+ * Browser Haptic Feedback helper utilizing Navigator Vibration API.
+ * Gracefully silent on unsupported devices or iOS without WebKit vibration flags.
+ */
+function vibrateHaptic(pattern: number | number[] = 15) {
+  try {
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(pattern);
+    }
+  } catch {}
+}
+
 export default function OneHandNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [handSide, setHandSide] = useState<"right" | "left">("right");
   const [reachabilityActive, setReachabilityActive] = useState(false);
@@ -27,8 +39,9 @@ export default function OneHandNav() {
     } catch {}
   }, []);
 
-  // Save side preference
+  // Save side preference with haptic confirmation
   const toggleSide = () => {
+    vibrateHaptic([12, 25, 12]);
     const nextSide = handSide === "right" ? "left" : "right";
     setHandSide(nextSide);
     unlockAudio();
@@ -40,6 +53,7 @@ export default function OneHandNav() {
 
   // Toggle reachability mode (brings top screen content down into thumb zone)
   const toggleReachability = () => {
+    vibrateHaptic(20);
     const nextState = !reachabilityActive;
     setReachabilityActive(nextState);
     unlockAudio();
@@ -66,19 +80,32 @@ export default function OneHandNav() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  // Open command palette via custom event or keyboard simulation
-  const triggerSearch = () => {
+  // Robust target navigation that survives component unmounting
+  const handleNavigate = (href: string) => {
+    vibrateHaptic(15);
+    unlockAudio();
+    playSoftTick(800, 0.04);
     setIsOpen(false);
+    router.push(href);
+  };
+
+  // Open search modal via custom event or global keydown
+  const triggerSearch = () => {
+    vibrateHaptic(15);
+    unlockAudio();
+    playSoftTick(720, 0.04);
+    setIsOpen(false);
+    window.dispatchEvent(new CustomEvent("bodhi:open-search"));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
   };
 
   const navItems = [
-    { href: "/", label: "Home", icon: "🪷", color: "#d97706" },
-    { href: "/practice", label: "Sit Timer", icon: "🔔", color: "#b45309" },
-    { href: "/library", label: "Library", icon: "📚", color: "#059669" },
-    { href: "/journey", label: "Journey", icon: "📈", color: "#2563eb" },
-    { href: "/journal", label: "Journal", icon: "📖", color: "#7c3aed" },
-    { href: "/teachings", label: "Teachings", icon: "📜", color: "#a16207" },
+    { href: "/", label: "Home", icon: "🪷" },
+    { href: "/practice", label: "Sit Timer", icon: "🔔" },
+    { href: "/library", label: "Library", icon: "📚" },
+    { href: "/teachings", label: "Teachings", icon: "📜" },
+    { href: "/journal", label: "Journal", icon: "📖" },
+    { href: "/journey", label: "Journey", icon: "📈" },
   ];
 
   if (!enabled) return null;
@@ -92,7 +119,10 @@ export default function OneHandNav() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            onClick={toggleReachability}
+            onClick={() => {
+              vibrateHaptic(15);
+              toggleReachability();
+            }}
             className="fixed top-0 inset-x-0 z-50 flex items-center justify-center gap-2 bg-gradient-to-b from-amber-900/90 to-stone-900/80 px-4 py-3.5 text-xs font-bold text-amber-100 shadow-xl backdrop-blur-md"
             aria-label="One-Hand Reachability active. Tap to restore full screen"
           >
@@ -120,38 +150,40 @@ export default function OneHandNav() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => setIsOpen(false)}
-                className="fixed inset-0 z-10 bg-black/30 backdrop-blur-[2px]"
+                onClick={() => {
+                  vibrateHaptic(10);
+                  setIsOpen(false);
+                }}
+                className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[2px]"
               />
 
               {/* Thumb Zone Card */}
               <motion.div
-                initial={{ scale: 0.8, opacity: 0, y: 20 }}
+                initial={{ scale: 0.85, opacity: 0, y: 20 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.8, opacity: 0, y: 20 }}
-                transition={{ type: "spring", stiffness: 380, damping: 25 }}
-                className={`absolute bottom-14 z-20 w-64 rounded-3xl border border-amber-900/20 bg-stone-900/95 p-3.5 text-stone-100 shadow-[0_20px_60px_rgba(0,0,0,0.5)] backdrop-blur-lg ${
+                exit={{ scale: 0.85, opacity: 0, y: 20 }}
+                transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                className={`absolute bottom-14 z-20 w-72 rounded-3xl border border-amber-900/20 bg-stone-900/95 p-3.5 text-stone-100 shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl ${
                   handSide === "right" ? "right-0" : "left-0"
                 }`}
               >
-                {/* Header with Handedness & Reachability Switch */}
+                {/* Header with Handedness & Indicator */}
                 <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-                    <span>☸</span>
+                    <span className="text-sm">☸</span>
                     <span>One-Hand Hub</span>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {/* Toggle Handedness */}
-                    <button
-                      type="button"
-                      onClick={toggleSide}
-                      className="rounded-full bg-white/10 px-2 py-1 text-[0.65rem] font-bold text-stone-300 transition hover:bg-white/20 hover:text-white"
-                      title={`Switch to ${handSide === "right" ? "Left" : "Right"}-Hand mode`}
-                    >
-                      {handSide === "right" ? "👉 Right Hand" : "👈 Left Hand"}
-                    </button>
-                  </div>
+                  {/* Toggle Handedness */}
+                  <button
+                    type="button"
+                    onClick={toggleSide}
+                    className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[0.65rem] font-bold text-stone-200 transition active:scale-95 hover:bg-white/20 hover:text-white"
+                    title={`Switch to ${handSide === "right" ? "Left" : "Right"}-Hand mode`}
+                  >
+                    <span>{handSide === "right" ? "👉 Right Thumb" : "👈 Left Thumb"}</span>
+                    <span className="opacity-50">⇄</span>
+                  </button>
                 </div>
 
                 {/* Reachability Trigger Button */}
@@ -161,7 +193,7 @@ export default function OneHandNav() {
                     toggleReachability();
                     setIsOpen(false);
                   }}
-                  className={`mt-2.5 flex w-full items-center justify-between rounded-2xl px-3 py-2 text-xs font-bold transition ${
+                  className={`mt-2.5 flex w-full items-center justify-between rounded-2xl px-3 py-2 text-xs font-bold transition active:scale-98 ${
                     reachabilityActive
                       ? "bg-amber-500 text-stone-950 shadow-sm"
                       : "bg-white/10 text-stone-200 hover:bg-white/15"
@@ -176,40 +208,50 @@ export default function OneHandNav() {
                   </span>
                 </button>
 
-                {/* Thumb Targets Grid */}
-                <div className="mt-2.5 grid grid-cols-2 gap-1.5">
-                  {navItems.map((item) => {
-                    const isActive = pathname === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => {
-                          unlockAudio();
-                          playSoftTick(800, 0.04);
-                          setIsOpen(false);
-                        }}
-                        className={`flex items-center gap-2.5 rounded-2xl p-2.5 text-xs font-semibold transition ${
-                          isActive
-                            ? "bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40"
-                            : "bg-white/5 text-stone-200 hover:bg-white/10 hover:text-white"
-                        }`}
-                      >
-                        <span className="text-base leading-none">{item.icon}</span>
-                        <span className="truncate">{item.label}</span>
-                      </Link>
-                    );
-                  })}
+                {/* Thumb Targets Grid — 3 columns with label cleanly below icon */}
+                <div className="mt-2.5">
+                  <p className="mb-1 text-[0.62rem] font-bold uppercase tracking-wider text-amber-400/80">
+                    Thumb Quick Targets
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {navItems.map((item) => {
+                      const isActive = pathname === item.href;
+                      return (
+                        <button
+                          key={item.href}
+                          type="button"
+                          onClick={() => handleNavigate(item.href)}
+                          className={`group relative flex min-h-[58px] flex-col items-center justify-center rounded-2xl px-1 py-2 transition-all active:scale-95 ${
+                            isActive
+                              ? "bg-amber-500/25 text-amber-200 ring-1 ring-amber-400/60 shadow-inner"
+                              : "bg-white/5 text-stone-200 hover:bg-white/10 hover:text-white"
+                          }`}
+                          aria-label={`Open ${item.label}`}
+                        >
+                          <span className="text-xl leading-none transition-transform group-hover:scale-110">
+                            {item.icon}
+                          </span>
+                          <span className="mt-1.5 block w-full truncate text-center text-[0.68rem] font-bold tracking-tight text-stone-300 group-hover:text-amber-100">
+                            {item.label}
+                          </span>
+                          {isActive && (
+                            <span className="absolute bottom-1 h-1 w-1 rounded-full bg-amber-400" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Quick Search in Thumb Zone */}
                 <button
                   type="button"
                   onClick={triggerSearch}
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-white/5 px-3 py-2 text-xs font-semibold text-stone-300 hover:bg-white/10"
+                  className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-stone-200 transition active:scale-98 hover:bg-white/15 hover:text-white"
                 >
-                  <span>🔍</span>
+                  <span className="text-sm">🔍</span>
                   <span>Search 1,040 Methods</span>
+                  <kbd className="rounded bg-black/30 px-1 py-0.5 text-[0.6rem] font-mono text-amber-300">⌘K</kbd>
                 </button>
               </motion.div>
             </>
@@ -221,10 +263,11 @@ export default function OneHandNav() {
           type="button"
           whileTap={{ scale: 0.9 }}
           onClick={() => {
+            vibrateHaptic(18);
             unlockAudio();
             playSoftTick(isOpen ? 640 : 880, 0.06);
-            setIsOpen((v) => !v)}
-          }
+            setIsOpen((v) => !v);
+          }}
           className={`relative flex h-12 w-12 items-center justify-center rounded-full border border-amber-500/30 bg-stone-900 text-amber-300 shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:scale-105 active:scale-95 ${
             isOpen ? "ring-2 ring-amber-400" : ""
           }`}

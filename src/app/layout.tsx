@@ -6,6 +6,7 @@ import { Ambient, MobileTabs, SiteFooter, SiteHeader } from "@/components/site-c
 import SwRegister from "@/components/sw-register";
 import GuideLazy from "@/components/guide-lazy";
 import OneHandNav from "@/components/one-hand-nav";
+import CommandPalette from "@/components/command-palette";
 
 export const metadata: Metadata = {
   title: { default: "Bodhi — Buddhist Meditation Sanctuary", template: "%s · Bodhi" },
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </main>
             <MobileTabs />
             <OneHandNav />
+            <CommandPalette showButton={false} />
             <GuideLazy />
             <SiteFooter />
           </ToastProvider>

@@ -12,9 +12,11 @@ import {
   playBell,
   playSoftTick,
   previewVoicePersona,
+  setAmbientTrackVolume,
   speakCue,
-  startAmbient,
-  stopAmbient,
+  startAmbientTrack,
+  stopAllAmbients,
+  stopAmbientTrack,
   stopSpeech,
   unlockAudio,
   VOICE_PERSONAS,
@@ -129,7 +131,10 @@ function PracticeInner() {
   const [soundOn, setSoundOn] = useLocalStorage("bodhi-sound", true);
   const [volume, setVolume] = useLocalStorage("bodhi-vol", 0.5);
   const [bellStyle, setBellStyle] = useLocalStorage<BellStyle>("bodhi-bell-style", "tibetan");
-  const [ambient, setAmbient] = useLocalStorage<AmbientKind>("bodhi-ambient", "off");
+  const [ambientTrack1, setAmbientTrack1] = useLocalStorage<AmbientKind>("bodhi-ambient-t1", "rain");
+  const [ambientTrack2, setAmbientTrack2] = useLocalStorage<AmbientKind>("bodhi-ambient-t2", "off");
+  const [ambientVol1, setAmbientVol1] = useLocalStorage<number>("bodhi-ambient-vol1", 0.06);
+  const [ambientVol2, setAmbientVol2] = useLocalStorage<number>("bodhi-ambient-vol2", 0.04);
   const [voicePersona, setVoicePersona] = useLocalStorage<VoicePersonaId>("bodhi-voice-persona", "ananda");
   const [voiceCues, setVoiceCues] = useLocalStorage("bodhi-voice", false);
   const [auditioningVoice, setAuditioningVoice] = useState(false);
@@ -204,7 +209,7 @@ function PracticeInner() {
   const finish = useCallback(() => {
     clearTick();
     setPhase("complete");
-    stopAmbient();
+    stopAllAmbients();
     stopSpeech();
     if (soundOn) {
       playBell(9, volume, bellStyle);
@@ -221,10 +226,11 @@ function PracticeInner() {
   const startSitting = useCallback(() => {
     setPhase("sitting");
     if (soundOn) playBell(7, volume, bellStyle);
-    if (ambient !== "off") startAmbient(ambient, 0.05);
+    if (ambientTrack1 !== "off") startAmbientTrack(1, ambientTrack1, ambientVol1);
+    if (ambientTrack2 !== "off") startAmbientTrack(2, ambientTrack2, ambientVol2);
     endAtRef.current = Date.now() + remaining * 1000;
     rungRef.current = new Set([0]);
-  }, [soundOn, volume, bellStyle, ambient, remaining]);
+  }, [soundOn, volume, bellStyle, ambientTrack1, ambientTrack2, ambientVol1, ambientVol2, remaining]);
 
   const begin = useCallback(() => {
     unlockAudio();
@@ -278,23 +284,69 @@ function PracticeInner() {
     }
     clearTick();
     setPhase("paused");
-    stopAmbient();
+    stopAllAmbients();
   }, [clearTick]);
 
   const resume = useCallback(() => {
     endAtRef.current = Date.now() + remaining * 1000;
     setPhase("sitting");
-    if (ambient !== "off") startAmbient(ambient, 0.05);
-  }, [remaining, ambient]);
+    if (ambientTrack1 !== "off") startAmbientTrack(1, ambientTrack1, ambientVol1);
+    if (ambientTrack2 !== "off") startAmbientTrack(2, ambientTrack2, ambientVol2);
+  }, [remaining, ambientTrack1, ambientTrack2, ambientVol1, ambientVol2]);
 
   const reset = useCallback(() => {
     clearTick();
-    stopAmbient();
+    stopAllAmbients();
     stopSpeech();
     setPhase("idle");
     setRemaining(totalSeconds);
     rungRef.current = new Set();
   }, [clearTick, totalSeconds]);
+
+  // Live multi-track adjustments during active sitting
+  const handleTrackChange = useCallback((track: 1 | 2, kind: AmbientKind) => {
+    unlockAudio();
+    if (track === 1) {
+      setAmbientTrack1(kind);
+      if (phase === "sitting") {
+        if (kind === "off") stopAmbientTrack(1);
+        else startAmbientTrack(1, kind, ambientVol1);
+      }
+    } else {
+      setAmbientTrack2(kind);
+      if (phase === "sitting") {
+        if (kind === "off") stopAmbientTrack(2);
+        else startAmbientTrack(2, kind, ambientVol2);
+      }
+    }
+  }, [phase, ambientVol1, ambientVol2, setAmbientTrack1, setAmbientTrack2]);
+
+  const handleTrackVolume = useCallback((track: 1 | 2, val: number) => {
+    if (track === 1) {
+      setAmbientVol1(val);
+      if (phase === "sitting" && ambientTrack1 !== "off") {
+        setAmbientTrackVolume(1, val);
+      }
+    } else {
+      setAmbientVol2(val);
+      if (phase === "sitting" && ambientTrack2 !== "off") {
+        setAmbientTrackVolume(2, val);
+      }
+    }
+  }, [phase, ambientTrack1, ambientTrack2, setAmbientVol1, setAmbientVol2]);
+
+  const applyHarmonyPreset = useCallback((t1: AmbientKind, t2: AmbientKind, v1 = 0.06, v2 = 0.04) => {
+    unlockAudio();
+    setAmbientTrack1(t1);
+    setAmbientTrack2(t2);
+    setAmbientVol1(v1);
+    setAmbientVol2(v2);
+    if (phase === "sitting") {
+      stopAllAmbients();
+      if (t1 !== "off") startAmbientTrack(1, t1, v1);
+      if (t2 !== "off") startAmbientTrack(2, t2, v2);
+    }
+  }, [phase, setAmbientTrack1, setAmbientTrack2, setAmbientVol1, setAmbientVol2]);
 
   // keyboard: Space pause/resume, F focus, M mute
   useEffect(() => {
@@ -387,7 +439,7 @@ function PracticeInner() {
         <div className="mt-2 flex justify-center"><FoldHint /></div>
         <h1 className="font-display mt-2 text-balance text-4xl font-semibold md:text-5xl">Settle in. The bowl will call you.</h1>
         <p className="mx-auto mt-3 max-w-xl text-sm text-stone-600">
-          Bowl synthesized live · drift-proof timer · wake-lock · ambient rain · spoken cues · focus mode.
+          Bowl synthesized live · drift-proof timer · wake-lock · dual-track ambient mixer · spoken cues · focus mode.
           Keys: <kbd className="rounded bg-stone-900/8 px-1.5 font-mono text-xs">Space</kbd> pause · <kbd className="rounded bg-stone-900/8 px-1.5 font-mono text-xs">F</kbd> focus · <kbd className="rounded bg-stone-900/8 px-1.5 font-mono text-xs">M</kbd> mute
         </p>
         <div className="mt-5 inline-flex rounded-full border border-amber-900/15 bg-white p-1">
@@ -553,40 +605,171 @@ function PracticeInner() {
                     </p>
                   </div>
 
-                  {/* Ambient Soundscape */}
-                  <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[0.72rem] font-bold uppercase tracking-wider text-amber-900">
-                        🌧 Ambient Soundscape
-                      </label>
-                      <span className="text-[0.7rem] font-bold text-stone-500 capitalize">{ambient}</span>
+                  {/* Multi-Track Ambient Soundscape Mixer */}
+                  <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-3.5 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-stone-200/60 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">🌧</span>
+                        <label className="text-[0.72rem] font-bold uppercase tracking-wider text-amber-900">
+                          Dual-Track Ambient Mixer
+                        </label>
+                      </div>
+                      <span className="text-[0.65rem] font-semibold text-stone-500">
+                        {ambientTrack1 !== "off" || ambientTrack2 !== "off" ? "2-Track Layering" : "Silent Sitting"}
+                      </span>
                     </div>
-                    <div className="mt-2 grid grid-cols-3 gap-1.5">
-                      {AMBIENT_OPTIONS.map((a) => (
+
+                    {/* Quick Harmony Presets */}
+                    <div className="mt-2.5">
+                      <div className="flex items-center justify-between text-[0.65rem] font-bold uppercase tracking-wider text-stone-500">
+                        <span>Harmony Blends</span>
+                        <span className="text-amber-800 font-normal">One-tap pairings</span>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
                         <button
-                          key={a.id}
                           type="button"
-                          onClick={() => {
-                            unlockAudio();
-                            setAmbient(a.id);
-                            if (phase === "sitting") {
-                              if (a.id === "off") stopAmbient();
-                              else startAmbient(a.id, 0.05);
-                            }
-                          }}
-                          className={`rounded-lg px-2 py-1.5 text-center text-[0.68rem] font-bold transition ${
-                            ambient === a.id
-                              ? "bg-stone-900 text-amber-100 shadow-sm"
-                              : "border border-stone-200 bg-white text-stone-600 hover:border-amber-500/50"
+                          onClick={() => applyHarmonyPreset("rain", "forest", 0.07, 0.04)}
+                          className={`rounded-lg px-2 py-1 text-[0.66rem] font-bold transition ${
+                            ambientTrack1 === "rain" && ambientTrack2 === "forest"
+                              ? "bg-amber-800 text-amber-100 shadow-xs"
+                              : "border border-stone-200/80 bg-white text-stone-600 hover:border-amber-400"
                           }`}
                         >
-                          {a.name}
+                          🌧🌲 Rain + Forest
                         </button>
-                      ))}
+                        <button
+                          type="button"
+                          onClick={() => applyHarmonyPreset("creek", "om_drone", 0.06, 0.05)}
+                          className={`rounded-lg px-2 py-1 text-[0.66rem] font-bold transition ${
+                            ambientTrack1 === "creek" && ambientTrack2 === "om_drone"
+                              ? "bg-amber-800 text-amber-100 shadow-xs"
+                              : "border border-stone-200/80 bg-white text-stone-600 hover:border-amber-400"
+                          }`}
+                        >
+                          🌊☸ Stream + 432Hz Om
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyHarmonyPreset("noise", "rain", 0.05, 0.04)}
+                          className={`rounded-lg px-2 py-1 text-[0.66rem] font-bold transition ${
+                            ambientTrack1 === "noise" && ambientTrack2 === "rain"
+                              ? "bg-amber-800 text-amber-100 shadow-xs"
+                              : "border border-stone-200/80 bg-white text-stone-600 hover:border-amber-400"
+                          }`}
+                        >
+                          🟤🌧 Brown Noise + Rain
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyHarmonyPreset("off", "off", 0.05, 0.04)}
+                          className={`rounded-lg px-2 py-1 text-[0.66rem] font-bold transition ${
+                            ambientTrack1 === "off" && ambientTrack2 === "off"
+                              ? "bg-stone-900 text-white shadow-xs"
+                              : "border border-stone-200/80 bg-white text-stone-500 hover:border-amber-400"
+                          }`}
+                        >
+                          🔇 Silence
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1.5 text-[0.7rem] text-stone-500">
-                      {AMBIENT_OPTIONS.find((a) => a.id === ambient)?.description}
-                    </p>
+
+                    {/* Track 1: Base Layer */}
+                    <div className="mt-3.5 rounded-xl border border-stone-200/90 bg-white p-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-[0.7rem] font-bold text-amber-950">
+                          <span className="grid h-4 w-4 place-items-center rounded bg-amber-100 text-[0.6rem] text-amber-800 font-bold">1</span>
+                          <span>Layer 1 · Base Atmosphere</span>
+                        </div>
+                        <span className="text-[0.65rem] font-bold text-amber-800 capitalize">
+                          {AMBIENT_OPTIONS.find((a) => a.id === ambientTrack1)?.name}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-3 gap-1">
+                        {AMBIENT_OPTIONS.map((a) => (
+                          <button
+                            key={`t1-${a.id}`}
+                            type="button"
+                            onClick={() => handleTrackChange(1, a.id)}
+                            className={`rounded-lg px-1.5 py-1 text-center text-[0.65rem] font-bold transition ${
+                              ambientTrack1 === a.id
+                                ? "bg-stone-900 text-amber-100 shadow-xs ring-1 ring-amber-400/50"
+                                : "border border-stone-200 bg-stone-50/50 text-stone-600 hover:border-amber-500/40"
+                            }`}
+                          >
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      {ambientTrack1 !== "off" && (
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <span className="text-[0.62rem] font-semibold text-stone-400">Vol</span>
+                          <input
+                            type="range"
+                            min="0.01"
+                            max="0.15"
+                            step="0.005"
+                            value={ambientVol1}
+                            onChange={(e) => handleTrackVolume(1, parseFloat(e.target.value))}
+                            className="h-1.5 flex-1 cursor-pointer accent-amber-600"
+                            aria-label="Layer 1 ambient volume"
+                          />
+                          <span className="w-8 text-right font-mono text-[0.62rem] font-bold text-stone-500">
+                            {Math.round((ambientVol1 / 0.15) * 100)}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Track 2: Texture & Harmony Layer */}
+                    <div className="mt-2.5 rounded-xl border border-stone-200/90 bg-white p-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-[0.7rem] font-bold text-amber-950">
+                          <span className="grid h-4 w-4 place-items-center rounded bg-amber-100 text-[0.6rem] text-amber-800 font-bold">2</span>
+                          <span>Layer 2 · Texture &amp; Harmony</span>
+                        </div>
+                        <span className="text-[0.65rem] font-bold text-amber-800 capitalize">
+                          {AMBIENT_OPTIONS.find((a) => a.id === ambientTrack2)?.name}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-3 gap-1">
+                        {AMBIENT_OPTIONS.map((a) => (
+                          <button
+                            key={`t2-${a.id}`}
+                            type="button"
+                            onClick={() => handleTrackChange(2, a.id)}
+                            className={`rounded-lg px-1.5 py-1 text-center text-[0.65rem] font-bold transition ${
+                              ambientTrack2 === a.id
+                                ? "bg-stone-900 text-amber-100 shadow-xs ring-1 ring-amber-400/50"
+                                : "border border-stone-200 bg-stone-50/50 text-stone-600 hover:border-amber-500/40"
+                            }`}
+                          >
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      {ambientTrack2 !== "off" && (
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <span className="text-[0.62rem] font-semibold text-stone-400">Vol</span>
+                          <input
+                            type="range"
+                            min="0.01"
+                            max="0.15"
+                            step="0.005"
+                            value={ambientVol2}
+                            onChange={(e) => handleTrackVolume(2, parseFloat(e.target.value))}
+                            className="h-1.5 flex-1 cursor-pointer accent-amber-600"
+                            aria-label="Layer 2 ambient volume"
+                          />
+                          <span className="w-8 text-right font-mono text-[0.62rem] font-bold text-stone-500">
+                            {Math.round((ambientVol2 / 0.15) * 100)}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Voice Persona */}

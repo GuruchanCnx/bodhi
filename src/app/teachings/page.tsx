@@ -5,6 +5,7 @@ import Link from "next/link";
 import { eightfoldPath, fivePrecepts, fourNobleTruths, quotes } from "@/lib/content";
 import { SectionHeading } from "@/components/ui";
 import { useDebounced } from "@/components/chrome";
+import VowTracker from "@/components/vow-tracker";
 
 const suttas = [
   { title: "Ānāpānasati Sutta — Mindfulness of Breathing", ref: "MN 118", body: "“Breathing in long, he knows: ‘I breathe in long.’ Breathing out short, he knows: ‘I breathe out short.’ He trains: ‘I shall breathe in experiencing the whole body… calming bodily formations.’”", theme: "Breath" },
@@ -23,21 +24,8 @@ const tabs = ["Foundations", "Eightfold Path", "Precepts", "Suttas & Verses"] as
 
 export default function TeachingsPage() {
   const [tab, setTab] = useState<(typeof tabs)[number]>("Foundations");
-  const [vows, setVows] = useState<boolean[]>([false, false, false, false, false]);
   const [suttaQ, setSuttaQ] = useState("");
   const dq = useDebounced(suttaQ, 200);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("bodhi-precepts");
-      if (raw) setVows(JSON.parse(raw));
-    } catch { /* noop */ }
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem("bodhi-precepts", JSON.stringify(vows));
-    } catch { /* noop */ }
-  }, [vows]);
 
   const filteredSuttas = useMemo(
     () =>
@@ -48,7 +36,6 @@ export default function TeachingsPage() {
       ),
     [dq]
   );
-  const kept = vows.filter(Boolean).length;
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-12">
@@ -131,37 +118,8 @@ export default function TeachingsPage() {
       )}
 
       {tab === "Precepts" && (
-        <section className="mx-auto mt-10 max-w-3xl">
-          <div className="rounded-3xl border border-amber-900/10 bg-white p-8 text-center">
-            <p className="font-display text-3xl font-semibold">Today&apos;s vow — {kept} of 5 kept</p>
-            <div className="mx-auto mt-3 h-2.5 max-w-sm overflow-hidden rounded-full bg-stone-100">
-              <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all" style={{ width: `${(kept / 5) * 100}%` }} />
-            </div>
-            <p className="mx-auto mt-3 max-w-md text-sm text-stone-500">
-              Each morning, take the precepts as a vow. Each evening, review with honesty and kindness — never guilt. Saved on this device.
-            </p>
-          </div>
-          <div className="mt-5 space-y-3">
-            {fivePrecepts.map((p, i) => (
-              <button
-                key={p.name}
-                onClick={() => setVows((v) => v.map((x, j) => (j === i ? !x : x)))}
-                className={`flex w-full items-start gap-4 rounded-3xl border p-5 text-left transition ${vows[i] ? "border-emerald-600/40 bg-emerald-50/60" : "border-amber-900/10 bg-white hover:border-amber-700/40"}`}
-              >
-                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-lg ${vows[i] ? "bg-emerald-600 text-white" : "bg-stone-100 text-stone-400"}`}>
-                  {vows[i] ? "✓" : i + 1}
-                </span>
-                <span>
-                  <span className="font-semibold text-stone-900">{i + 1}. I undertake to refrain from — {p.name.toLowerCase()}</span>
-                  <span className="block text-xs italic text-amber-800">{p.pali}</span>
-                  <span className="mt-1 block text-sm text-stone-600">{p.detail}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setVows([false, false, false, false, false])} className="mx-auto mt-4 block text-xs font-semibold text-stone-400 hover:text-stone-600">
-            Reset for tomorrow ↺
-          </button>
+        <section className="mx-auto mt-8 max-w-4xl">
+          <VowTracker />
         </section>
       )}
 
