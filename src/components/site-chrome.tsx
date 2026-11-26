@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import CommandPalette from "./command-palette";
 import ThemeToggleClient from "./theme-toggle";
 import { useScrolled } from "./chrome";
+import { hapticTap } from "@/lib/haptics";
 
 function LotusMark() {
   return (
@@ -131,6 +132,7 @@ export function MobileTabs() {
           <Link
             key={l.href}
             href={l.href}
+            onClick={() => hapticTap()}
             aria-current={active ? "page" : undefined}
             className={`pressable flex min-w-[3.5rem] flex-col items-center gap-0.5 rounded-2xl px-3 py-1.5 text-[0.65rem] font-bold transition ${
               active ? "bg-[var(--ink)] text-[var(--bg)] shadow-lg" : "opacity-70"

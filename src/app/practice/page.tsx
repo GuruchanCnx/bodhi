@@ -27,6 +27,7 @@ import { BreathingOrb } from "@/components/ui";
 import { AgentDebrief } from "@/components/agent-widgets";
 import { FoldHint } from "@/components/adaptive";
 import { pushRecent, useLocalStorage, useToast, useWakeLock } from "@/components/chrome";
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
 
 type Phase = "idle" | "prepare" | "sitting" | "paused" | "complete";
 
@@ -209,6 +210,7 @@ function PracticeInner() {
   const finish = useCallback(() => {
     clearTick();
     setPhase("complete");
+    hapticSuccess();
     stopAllAmbients();
     stopSpeech();
     if (soundOn) {
@@ -225,6 +227,7 @@ function PracticeInner() {
 
   const startSitting = useCallback(() => {
     setPhase("sitting");
+    hapticSuccess();
     if (soundOn) playBell(7, volume, bellStyle);
     if (ambientTrack1 !== "off") startAmbientTrack(1, ambientTrack1, ambientVol1);
     if (ambientTrack2 !== "off") startAmbientTrack(2, ambientTrack2, ambientVol2);
@@ -233,6 +236,7 @@ function PracticeInner() {
   }, [soundOn, volume, bellStyle, ambientTrack1, ambientTrack2, ambientVol1, ambientVol2, remaining]);
 
   const begin = useCallback(() => {
+    hapticTap();
     unlockAudio();
     setSaved(false);
     setDebrief(null);
@@ -278,6 +282,7 @@ function PracticeInner() {
 
   // pause keeps remaining; resume rebuilds endAt
   const pause = useCallback(() => {
+    hapticTap();
     if (endAtRef.current) {
       const left = Math.max(0, Math.round((endAtRef.current - Date.now()) / 1000));
       setRemaining(left);
@@ -288,6 +293,7 @@ function PracticeInner() {
   }, [clearTick]);
 
   const resume = useCallback(() => {
+    hapticTap();
     endAtRef.current = Date.now() + remaining * 1000;
     setPhase("sitting");
     if (ambientTrack1 !== "off") startAmbientTrack(1, ambientTrack1, ambientVol1);
@@ -295,6 +301,7 @@ function PracticeInner() {
   }, [remaining, ambientTrack1, ambientTrack2, ambientVol1, ambientVol2]);
 
   const reset = useCallback(() => {
+    hapticTap();
     clearTick();
     stopAllAmbients();
     stopSpeech();
@@ -305,6 +312,7 @@ function PracticeInner() {
 
   // Live multi-track adjustments during active sitting
   const handleTrackChange = useCallback((track: 1 | 2, kind: AmbientKind) => {
+    hapticTap();
     unlockAudio();
     if (track === 1) {
       setAmbientTrack1(kind);
@@ -336,6 +344,7 @@ function PracticeInner() {
   }, [phase, ambientTrack1, ambientTrack2, setAmbientVol1, setAmbientVol2]);
 
   const applyHarmonyPreset = useCallback((t1: AmbientKind, t2: AmbientKind, v1 = 0.06, v2 = 0.04) => {
+    hapticTap();
     unlockAudio();
     setAmbientTrack1(t1);
     setAmbientTrack2(t2);
@@ -411,6 +420,7 @@ function PracticeInner() {
         }),
       });
       if (res.ok) {
+        hapticSuccess();
         setSaved(true);
         toast("✦ Sitting saved to your Journey");
       } else toast("Could not save — offline?", "info");
@@ -863,9 +873,12 @@ function PracticeInner() {
                     {["😣", "😟", "😐", "🙂", "😊"].map((e, i) => (
                       <button
                         key={e}
-                        onClick={() => setMoodBefore(i + 1)}
+                        onClick={() => {
+                          hapticTap();
+                          setMoodBefore(i + 1);
+                        }}
                         aria-pressed={moodBefore === i + 1}
-                        className={`rounded-xl border px-2 py-1.5 text-lg transition ${
+                        className={`rounded-xl border px-2 py-1.5 text-lg transition active:scale-95 ${
                           moodBefore === i + 1
                             ? "scale-110 border-amber-700 bg-amber-100"
                             : "border-stone-200 hover:border-amber-500"
@@ -939,7 +952,7 @@ function PracticeInner() {
                     <p className="text-xs font-bold uppercase tracking-wider text-amber-300">Heart now?</p>
                     <div className="mt-2 flex gap-1.5" role="group" aria-label="Mood after">
                       {["😣", "😟", "😐", "🙂", "😊"].map((e, i) => (
-                        <button key={e} onClick={() => setMoodAfter(i + 1)} aria-pressed={moodAfter === i + 1} className={`rounded-xl border px-2 py-1.5 text-xl transition ${moodAfter === i + 1 ? "scale-110 border-amber-400 bg-amber-400/20" : "border-white/15 hover:border-amber-400"}`}>
+                        <button key={e} onClick={() => { hapticTap(); setMoodAfter(i + 1); }} aria-pressed={moodAfter === i + 1} className={`rounded-xl border px-2 py-1.5 text-xl transition active:scale-95 ${moodAfter === i + 1 ? "scale-110 border-amber-400 bg-amber-400/20" : "border-white/15 hover:border-amber-400"}`}>
                           {e}
                         </button>
                       ))}

@@ -295,3 +295,89 @@ export async function deleteHabitFromFirestore(habitId: string): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, `${HABITS_PATH}/${habitId}`);
   }
 }
+
+// =================== PRACTICE PLANS ===================
+
+export async function getPracticePlansFromFirestore(
+  limitCount = 12
+): Promise<PracticePlanDoc[]> {
+  try {
+    const colRef = collection(firestore, PLANS_PATH);
+    const q = query(colRef, orderBy("createdAt", "desc"), limit(limitCount));
+    const snapshot = await getDocs(q);
+    const results: PracticePlanDoc[] = [];
+    snapshot.forEach((snap) => {
+      const data = snap.data();
+      results.push({
+        ...(data as Omit<PracticePlanDoc, "days">),
+        days:
+          typeof data.days === "string"
+            ? JSON.parse(data.days)
+            : Array.isArray(data.days)
+            ? data.days
+            : [],
+      });
+    });
+    return results;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, PLANS_PATH);
+  }
+}
+
+export async function savePracticePlanToFirestore(
+  data: Omit<PracticePlanDoc, "id" | "createdAt"> & { id?: string }
+): Promise<PracticePlanDoc> {
+  const id = data.id || `plan_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const now = new Date().toISOString();
+  const plan: PracticePlanDoc = {
+    id,
+    title: data.title.slice(0, 120),
+    goal: data.goal.slice(0, 200),
+    minutesPerDay: data.minutesPerDay,
+    level: data.level.slice(0, 50),
+    days: data.days,
+    active: Boolean(data.active),
+    createdAt: now,
+    userId: data.userId ?? null,
+  };
+
+  try {
+    const docRef = doc(firestore, PLANS_PATH, id);
+    await setDoc(docRef, {
+      ...plan,
+      days: JSON.stringify(plan.days),
+    });
+    return plan;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${PLANS_PATH}/${id}`);
+  }
+}
+
+export async function activatePracticePlanInFirestore(planId: string): Promise<void> {
+  try {
+    const existing = await getPracticePlansFromFirestore(30);
+    await Promise.all(
+      existing.map(async (p) => {
+        const shouldBeActive = p.id === planId;
+        if (p.active !== shouldBeActive) {
+          const docRef = doc(firestore, PLANS_PATH, p.id);
+          await updateDoc(docRef, {
+            title: p.title,
+            active: shouldBeActive,
+          });
+        }
+      })
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${PLANS_PATH}/${planId}`);
+  }
+}
+
+export async function deletePracticePlanFromFirestore(planId: string): Promise<void> {
+  try {
+    const docRef = doc(firestore, PLANS_PATH, planId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${PLANS_PATH}/${planId}`);
+  }
+}

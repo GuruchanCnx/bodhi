@@ -1,38 +1,33 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { sql } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
-import { db } from "@/db";
 import { dailyItem, meditations, quotes, eightfoldPath } from "@/lib/content";
+import { allCanonTechniques } from "@/lib/canon";
+import { getSessionsFromFirestore } from "@/lib/firestore-service";
 import { Mandala, Petals, SectionHeading, Stat } from "@/components/ui";
 import TodayPath from "@/components/today-path";
 import { AgentBriefing, PlanBuilder } from "@/components/agent-widgets";
 import HabitsSection from "@/components/habits-section";
 
-export const revalidate = 3600; // ISR: stats refresh hourly, instant CDN hits
+export const revalidate = 120; // ISR: stats refresh every 2 min
 
 const getStatsCached = unstable_cache(
   async () => {
     try {
-      const [s, t] = await Promise.all([
-        db.execute(sql`
-          select count(*)::int as sessions, coalesce(sum(duration_seconds),0)::int as seconds
-          from meditation_sessions where completed = true`),
-        db.execute(sql`select count(*)::int as c from meditation_techniques`),
-      ]);
-      const row = (s?.rows?.[0] as unknown as { sessions?: number; seconds?: number }) ?? {};
-      const tech = (t?.rows?.[0] as unknown as { c?: number }) ?? {};
+      const sessions = await getSessionsFromFirestore(200);
+      const completed = sessions.filter((s) => s.completed !== false);
+      const totalSeconds = completed.reduce((acc, s) => acc + (s.durationSeconds || 0), 0);
       return {
-        sessions: row.sessions ?? 0,
-        minutes: Math.round((row.seconds ?? 0) / 60),
-        techniques: (tech.c ?? 0) + 8,
+        sessions: completed.length,
+        minutes: Math.round(totalSeconds / 60),
+        techniques: allCanonTechniques.length,
       };
     } catch {
-      return { sessions: 0, minutes: 0, techniques: 1048 };
+      return { sessions: 0, minutes: 0, techniques: allCanonTechniques.length };
     }
   },
-  ["home-stats"],
-  { revalidate: 3600, tags: ["stats"] }
+  ["home-stats-firestore"],
+  { revalidate: 120, tags: ["stats"] }
 );
 
 async function StatsRow() {

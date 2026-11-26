@@ -7,6 +7,7 @@ import { useToast } from "@/components/chrome";
 import { playBell, unlockAudio } from "@/lib/audio";
 import { ConfettiBurstOverlay } from "@/components/confetti-burst";
 import { exportAsPdf, exportAsPng, HabitTrendExportData } from "@/lib/habit-export";
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
 
 export interface HabitItem {
   id: string;
@@ -238,14 +239,11 @@ export default function HabitsSection() {
       playBell(4.5, 0.5, 432, "tibetan");
 
       // 4. Haptic vibration feedback for mobile
-      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-        try {
-          navigator.vibrate([20, 35, 20]);
-        } catch {}
-      }
+      hapticSuccess();
 
       toast(`✦ Completed: “${habit.title}” · ${streak}-day streak!`);
     } else {
+      hapticTap();
       toast("Habit unmarked for today");
     }
 
@@ -381,6 +379,7 @@ export default function HabitsSection() {
   };
 
   const testReminder = () => {
+    hapticSuccess();
     unlockAudio();
     playBell(6, 0.55, 432, "tibetan");
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
@@ -628,7 +627,10 @@ export default function HabitsSection() {
 
           <button
             type="button"
-            onClick={toggleReminder}
+            onClick={() => {
+              hapticTap();
+              toggleReminder();
+            }}
             aria-pressed={reminderActive}
             className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition shadow-xs ${
               reminderActive

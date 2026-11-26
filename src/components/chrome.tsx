@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { hapticFavorite } from "@/lib/haptics";
 
 // ---------- Theme: Dawn / Dusk / Auto (iOS-style) ----------
 export type ThemeMode = "dawn" | "dusk" | "auto";
@@ -132,14 +133,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 // ---------- Favorites + recents ----------
 export function useFavorites() {
   const [favs, setFavs] = useState<string[]>([]);
+  const favsRef = useRef<string[]>([]);
   useEffect(() => {
     try {
-      setFavs(JSON.parse(localStorage.getItem("bodhi-favs") || "[]"));
+      const loaded = JSON.parse(localStorage.getItem("bodhi-favs") || "[]");
+      if (Array.isArray(loaded)) {
+        favsRef.current = loaded;
+        setFavs(loaded);
+      }
     } catch {}
   }, []);
   const toggle = useCallback((slug: string) => {
+    const isAdding = !favsRef.current.includes(slug);
+    hapticFavorite(isAdding);
     setFavs((f) => {
       const next = f.includes(slug) ? f.filter((x) => x !== slug) : [slug, ...f].slice(0, 100);
+      favsRef.current = next;
       try {
         localStorage.setItem("bodhi-favs", JSON.stringify(next));
       } catch {}

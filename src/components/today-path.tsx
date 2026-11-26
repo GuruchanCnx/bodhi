@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { hapticTap } from "@/lib/haptics";
 
 type Rec = {
   slug: string; name: string; tradition: string; category: string;
@@ -16,6 +17,7 @@ export default function TodayPath() {
   const [recs, setRecs] = useState<Rec[]>([]);
 
   const generate = async () => {
+    hapticTap();
     setLoading(true);
     try {
       const res = await fetch("/api/guide", {
@@ -50,7 +52,10 @@ export default function TodayPath() {
               {[5, 10, 15, 20, 30].map((m) => (
                 <button
                   key={m}
-                  onClick={() => setMinutes(m)}
+                  onClick={() => {
+                    hapticTap();
+                    setMinutes(m);
+                  }}
                   aria-pressed={minutes === m}
                   className={`pressable pill px-4 py-2 text-sm font-bold transition ${minutes === m ? "bg-[var(--ink)] text-[var(--bg)] shadow-lg" : "opacity-70 hover:opacity-100"}`}
                 >

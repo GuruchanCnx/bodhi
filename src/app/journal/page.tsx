@@ -5,6 +5,8 @@ import { journalPrompts, dailyItem } from "@/lib/content";
 import { SectionHeading, SkeletonCard } from "@/components/ui";
 import { FoldHint } from "@/components/adaptive";
 import { cachedFetch, useDebounced, useToast } from "@/components/chrome";
+import JournalMoodChart, { parseHeartWeather } from "@/components/journal-mood-chart";
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
 
 type Entry = {
   id: string; title: string; content: string; mood: string | null;
@@ -12,6 +14,15 @@ type Entry = {
 };
 
 const moods = ["🌧 Difficult", "🌫 Cloudy", "🍃 Neutral", "🌤 Clear", "☀️ Radiant"];
+
+function toLocalDateKey(dateInput: Date | string): string {
+  const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export default function JournalPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -67,9 +78,51 @@ export default function JournalPage() {
 
   const words = useMemo(() => (content.trim() ? content.trim().split(/\s+/).length : 0), [content]);
 
+  // Dashboard metrics: Reflections count, Gratitude Streak (consecutive days with an entry), Gratitude notes & Avg mood
+  const dashboardStats = useMemo(() => {
+    const entryDays = new Set<string>();
+    let gratitudeCount = 0;
+    let moodSum = 0;
+    let moodCount = 0;
+
+    for (const e of entries) {
+      const key = toLocalDateKey(e.createdAt);
+      if (key) entryDays.add(key);
+      if (e.gratitude && e.gratitude.trim()) gratitudeCount++;
+      const score = parseHeartWeather(e.mood);
+      if (score !== null) {
+        moodSum += score;
+        moodCount++;
+      }
+    }
+
+    // Consecutive days with a journal entry starting today (or yesterday if none yet today)
+    let gratitudeStreak = 0;
+    const cursor = new Date();
+    cursor.setHours(12, 0, 0, 0);
+    if (!entryDays.has(toLocalDateKey(cursor))) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    while (entryDays.has(toLocalDateKey(cursor)) && gratitudeStreak < 366) {
+      gratitudeStreak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    const journaledToday = entryDays.has(toLocalDateKey(new Date()));
+
+    return {
+      totalEntries: entries.length,
+      gratitudeStreak,
+      journaledToday,
+      gratitudeCount,
+      avgMood: moodCount > 0 ? (moodSum / moodCount).toFixed(1) : null,
+    };
+  }, [entries]);
+
   const save = async () => {
     if (!content.trim() || saving) return;
     setSaving(true);
+    hapticSuccess();
     const optimistic: Entry = {
       id: editing ?? `tmp-${Date.now()}`,
       title: title || "Untitled reflection",
@@ -96,7 +149,6 @@ export default function JournalPage() {
       setEditing(null);
       try { localStorage.removeItem("bodhi-draft"); } catch {}
       setPrompt(journalPrompts[Math.floor(Math.random() * journalPrompts.length)]);
-      // bust cache
       await fetch("/api/journal?limit=100").then((r) => r.json()).then((d) => setEntries(d.entries ?? [])).catch(() => load(true));
     } catch {
       setEntries(prev);
@@ -108,6 +160,7 @@ export default function JournalPage() {
 
   const remove = async (id: string) => {
     if (!confirm("Release this entry? (delete)")) return;
+    hapticTap();
     const prev = entries;
     setEntries((e) => e.filter((x) => x.id !== id));
     try {
@@ -119,12 +172,14 @@ export default function JournalPage() {
   };
 
   const startEdit = (e: Entry) => {
+    hapticTap();
     setEditing(e.id); setTitle(e.title); setContent(e.content);
     setMood(e.mood ?? ""); setGratitude(e.gratitude ?? "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const exportAll = () => {
+    hapticTap();
     const text = entries.map((e) => `# ${e.title}\n${new Date(e.createdAt).toLocaleString()} ${e.mood ?? ""}\n\n${e.content}\n\nGrateful: ${e.gratitude ?? "—"}\n---`).join("\n\n");
     const blob = new Blob([text || "No entries yet."], { type: "text/markdown" });
     const a = document.createElement("a");
@@ -144,22 +199,94 @@ export default function JournalPage() {
       <SectionHeading
         eyebrow="Sati Journal · autosaved drafts"
         title="After sitting, put the heart into words"
-        sub="Wise reflection (yoniso manasikāra). Drafts autosave locally · {entries.length} reflections · export anytime."
+        sub={`Wise reflection (yoniso manasikāra). Drafts autosave locally · ${entries.length} ${entries.length === 1 ? "reflection" : "reflections"} · export anytime.`}
       />
 
       <div className="mt-3 flex justify-center"><FoldHint /></div>
-      <div className="dual-h mt-10 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+
+      {/* Journal Dashboard Metrics: Reflections Count + Gratitude Streak side by side */}
+      <section aria-label="Journal dashboard summary" className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-3xl border border-amber-900/10 bg-white p-4 shadow-xs">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-stone-400">
+            Total Entries
+          </p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display text-3xl font-bold tabular-nums text-stone-900">
+              {dashboardStats.totalEntries}
+            </span>
+            <span className="text-xs text-stone-500">reflections</span>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-amber-900/15 bg-gradient-to-br from-amber-50/80 to-white p-4 shadow-xs">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-amber-800">
+            Gratitude Streak
+          </p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display text-3xl font-bold tabular-nums text-amber-900">
+              {dashboardStats.gratitudeStreak}
+            </span>
+            <span className="text-xs font-semibold text-amber-800/80">
+              {dashboardStats.gratitudeStreak === 1 ? "day" : "days"}
+            </span>
+            <span className="text-sm" aria-hidden>
+              {dashboardStats.gratitudeStreak >= 3 ? "🔥" : dashboardStats.gratitudeStreak >= 1 ? "🪷" : "🌱"}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[0.7rem] text-stone-500">
+            {dashboardStats.journaledToday
+              ? "Reflected today"
+              : dashboardStats.gratitudeStreak > 0
+              ? "Write today to keep streak"
+              : "Begin consecutive daily notes"}
+          </p>
+        </div>
+
+        <div className="rounded-3xl border border-amber-900/10 bg-white p-4 shadow-xs">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-stone-400">
+            Gratitude Notes
+          </p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display text-3xl font-bold tabular-nums text-emerald-700">
+              {dashboardStats.gratitudeCount}
+            </span>
+            <span className="text-xs text-stone-500">named blessings</span>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-amber-900/10 bg-white p-4 shadow-xs">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-stone-400">
+            Heart Average
+          </p>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="font-display text-3xl font-bold tabular-nums text-stone-900">
+              {dashboardStats.avgMood ?? "—"}
+            </span>
+            {dashboardStats.avgMood && <span className="text-xs text-stone-400">/ 5.0</span>}
+          </div>
+        </div>
+      </section>
+
+      {/* D3 Weather of the Heart Trend Visualization */}
+      <div className="mt-6">
+        <JournalMoodChart entries={entries} />
+      </div>
+
+      <div className="dual-h mt-8 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
         <div className="h-fit rounded-[1.75rem] border border-amber-900/10 bg-white p-6 shadow-sm md:p-7 lg:sticky lg:top-24">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-2xl font-semibold">{editing ? "Edit reflection" : "New reflection"}</h2>
             {editing && (
-              <button onClick={() => { setEditing(null); setTitle(""); setContent(""); setMood(""); setGratitude(""); }} className="text-xs font-bold text-stone-400 hover:text-stone-600">
+              <button onClick={() => { hapticTap(); setEditing(null); setTitle(""); setContent(""); setMood(""); setGratitude(""); }} className="text-xs font-bold text-stone-400 hover:text-stone-600">
                 Cancel ✕
               </button>
             )}
           </div>
           <button
-            onClick={() => setPrompt(journalPrompts[Math.floor(Math.random() * journalPrompts.length)])}
+            onClick={() => {
+              hapticTap();
+              setPrompt(journalPrompts[Math.floor(Math.random() * journalPrompts.length)]);
+            }}
             className="mt-3 w-full rounded-2xl bg-amber-50 px-4 py-3 text-left text-sm italic text-amber-900 transition hover:bg-amber-100"
           >
             ✦ Contemplate: “{prompt}” <span className="ml-1 not-italic font-bold">↻</span>
@@ -174,12 +301,21 @@ export default function JournalPage() {
           <p className="mt-3 text-xs font-bold uppercase tracking-wider text-stone-500">Weather of the heart</p>
           <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Mood">
             {moods.map((m) => (
-              <button key={m} onClick={() => setMood(m)} aria-pressed={mood === m} className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${mood === m ? "border-amber-700 bg-amber-100 text-amber-900" : "border-stone-200 text-stone-500 hover:border-amber-600"}`}>
+              <button
+                key={m}
+                type="button"
+                onClick={() => {
+                  hapticTap();
+                  setMood(mood === m ? "" : m);
+                }}
+                aria-pressed={mood === m}
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition active:scale-95 ${mood === m ? "border-amber-700 bg-amber-100 text-amber-900" : "border-stone-200 text-stone-500 hover:border-amber-600"}`}
+              >
                 {m}
               </button>
             ))}
           </div>
-          <button onClick={save} disabled={saving || !content.trim()} className="mt-5 w-full rounded-full bg-stone-900 py-3.5 text-sm font-bold text-amber-50 transition hover:bg-amber-900 disabled:opacity-40">
+          <button onClick={save} disabled={saving || !content.trim()} className="mt-5 w-full rounded-full bg-stone-900 py-3.5 text-sm font-bold text-amber-50 transition hover:bg-amber-900 active:scale-[0.98] disabled:opacity-40">
             {saving ? "Saving…" : editing ? "✓ Update reflection" : "✦ Save reflection"}
           </button>
         </div>

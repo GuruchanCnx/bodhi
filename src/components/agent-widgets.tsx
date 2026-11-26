@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "./chrome";
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
 
 type Briefing = {
-  greeting: string; suggestion: string; minutes: number; moodHint: string;
+  greeting: string;
+  suggestion: string;
+  minutes: number;
+  moodHint: string;
   stats: { sessions: number; minutes: number; avgMinutes: number; streak: number };
   sit: { slug: string; name: string; minutes: number } | null;
 };
@@ -45,16 +49,25 @@ export function AgentBriefing() {
           {b.sit ? (
             <Link
               href={`/practice?technique=${b.sit.slug}&minutes=${b.sit.minutes}`}
+              onClick={() => hapticTap()}
               className="liquid-prominent pressable pill px-6 py-3 text-sm font-bold"
             >
               ▶ Start {b.sit.minutes}m — {b.sit.name.slice(0, 32)}
             </Link>
           ) : (
-            <Link href="/practice?minutes=10" className="liquid-prominent pressable pill px-6 py-3 text-sm font-bold">
+            <Link
+              href="/practice?minutes=10"
+              onClick={() => hapticTap()}
+              className="liquid-prominent pressable pill px-6 py-3 text-sm font-bold"
+            >
               ▶ Start 10-minute sit
             </Link>
           )}
-          <Link href="/plan" className="liquid-chip pressable pill px-6 py-3 text-sm font-bold">
+          <Link
+            href="/plan"
+            onClick={() => hapticTap()}
+            className="liquid-chip pressable pill px-6 py-3 text-sm font-bold"
+          >
             🗓 7-day plan →
           </Link>
         </div>
@@ -68,7 +81,16 @@ export function AgentBriefing() {
   );
 }
 
-type PlanDay = { day: number; slug: string; name: string; minutes: number; focus: string };
+export type PlanDay = { day: number; slug: string; name: string; minutes: number; focus: string };
+
+export type SavedPlan = {
+  id: string;
+  title: string;
+  goal: string;
+  days: PlanDay[];
+  active: boolean;
+  createdAt: string;
+};
 
 export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initialGoal?: string; initialMinutes?: number }) {
   const [goal, setGoal] = useState(initialGoal);
@@ -80,6 +102,7 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
 
   const build = async (save: boolean) => {
     if (loading) return;
+    hapticTap();
     setLoading(true);
     try {
       const res = await fetch("/api/agent", {
@@ -91,7 +114,11 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
       if (data.days) {
         setPlan(data);
         setSavedTick(save && !!data.savedId);
-        if (save && data.savedId) toast("🗓 Plan saved — activate it to follow along");
+        if (save && data.savedId) {
+          hapticSuccess();
+          toast("🗓 Plan saved — activate it to follow along");
+          window.dispatchEvent(new Event("bodhi:plans-changed"));
+        }
       } else toast("Could not build plan — try again", "info");
     } catch {
       toast("Plan builder offline?", "info");
@@ -105,13 +132,18 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
       await build(true);
       return;
     }
+    hapticTap();
     try {
-      await fetch("/api/agent", {
+      const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "activate-plan", id: plan.savedId }),
       });
-      toast("✦ Plan activated — day 1 awaits");
+      if (res.ok) {
+        hapticSuccess();
+        toast("✦ Plan activated — day 1 awaits");
+        window.dispatchEvent(new Event("bodhi:plans-changed"));
+      }
     } catch {}
   };
 
@@ -129,7 +161,15 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
         />
         <div className="liquid-segment" role="group" aria-label="Minutes per day">
           {[10, 15, 20, 30].map((m) => (
-            <button key={m} onClick={() => setMinutes(m)} aria-pressed={minutes === m} className={`pill px-4 py-2 text-sm font-bold ${minutes === m ? "bg-[var(--ink)] text-[var(--bg)] shadow" : "opacity-60 hover:opacity-100"}`}>
+            <button
+              key={m}
+              onClick={() => {
+                hapticTap();
+                setMinutes(m);
+              }}
+              aria-pressed={minutes === m}
+              className={`pill px-4 py-2 text-sm font-bold ${minutes === m ? "bg-[var(--ink)] text-[var(--bg)] shadow" : "opacity-60 hover:opacity-100"}`}
+            >
               {m}m
             </button>
           ))}
@@ -151,7 +191,11 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
                   <Link href={`/library/${d.slug}`} className="block truncate text-[0.83rem] font-bold hover:underline">{d.name}</Link>
                   <span className="block truncate text-[0.7rem] opacity-60">{d.focus} · {d.minutes}m</span>
                 </span>
-                <Link href={`/practice?technique=${d.slug}&minutes=${d.minutes}`} className="shrink-0 rounded-full bg-amber-600 px-3 py-1.5 text-[0.7rem] font-bold text-white hover:bg-amber-700">
+                <Link
+                  href={`/practice?technique=${d.slug}&minutes=${d.minutes}`}
+                  onClick={() => hapticTap()}
+                  className="shrink-0 rounded-full bg-amber-600 px-3 py-1.5 text-[0.7rem] font-bold text-white hover:bg-amber-700"
+                >
                   Sit →
                 </Link>
               </li>
@@ -171,10 +215,192 @@ export function PlanBuilder({ initialGoal = "", initialMinutes = 10 }: { initial
   );
 }
 
+export function SavedPlansList() {
+  const [plans, setPlans] = useState<SavedPlan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const toast = useToast();
+
+  const loadPlans = useCallback(async () => {
+    try {
+      const res = await fetch("/api/agent?action=plans");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.plans)) setPlans(data.plans);
+      }
+    } catch {
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPlans();
+    const handler = () => loadPlans();
+    window.addEventListener("bodhi:plans-changed", handler);
+    return () => window.removeEventListener("bodhi:plans-changed", handler);
+  }, [loadPlans]);
+
+  const handleActivate = async (id: string) => {
+    if (busyId) return;
+    hapticTap();
+    setBusyId(id);
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "activate-plan", id }),
+      });
+      if (res.ok) {
+        hapticSuccess();
+        setPlans((curr) => curr.map((p) => ({ ...p, active: p.id === id })));
+        toast("✦ Active 7-day program updated");
+      }
+    } catch {
+      toast("Could not update plan", "info");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (id: string, title: string) => {
+    if (busyId) return;
+    if (!confirm(`Release saved plan “${title}”?`)) return;
+    hapticTap();
+    setBusyId(id);
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete-plan", id }),
+      });
+      if (res.ok) {
+        setPlans((curr) => curr.filter((p) => p.id !== id));
+        toast("Plan removed");
+      }
+    } catch {
+      toast("Could not remove plan", "info");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="liquid-card squircle-lg mt-6 p-6" aria-busy="true">
+        <div className="skeleton h-5 w-44 rounded-full" />
+        <div className="skeleton mt-3 h-20 w-full rounded-2xl" />
+      </div>
+    );
+  }
+
+  return (
+    <section className="liquid-card squircle-lg mt-6 p-6 md:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">
+            Saved Sanctuary Programs
+          </p>
+          <h3 className="font-display ios-title mt-1 text-2xl">Your 7-day threads</h3>
+        </div>
+        <span className="liquid-chip pill px-3 py-1 text-xs font-bold tabular-nums opacity-80">
+          {plans.length} saved
+        </span>
+      </div>
+
+      {plans.length === 0 ? (
+        <p className="mt-4 rounded-2xl border border-dashed border-amber-900/20 p-6 text-center text-sm opacity-70">
+          No saved programs yet — weave a goal above and tap <strong>Save plan</strong> to pin it here.
+        </p>
+      ) : (
+        <div className="mt-5 space-y-4">
+          {plans.map((p) => (
+            <article
+              key={p.id}
+              className={`rounded-3xl border p-5 transition ${
+                p.active
+                  ? "border-amber-600/45 bg-amber-500/10 shadow-sm"
+                  : "border-white/10 bg-white/[0.03]"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-display text-xl font-semibold">{p.title}</h4>
+                    {p.active && (
+                      <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-white">
+                        ✦ Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs opacity-65">
+                    Goal: {p.goal} · Saved {new Date(p.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {!p.active && (
+                    <button
+                      onClick={() => handleActivate(p.id)}
+                      disabled={busyId === p.id}
+                      className="liquid-prominent pressable pill px-4 py-1.5 text-xs font-bold disabled:opacity-50"
+                    >
+                      {busyId === p.id ? "Updating…" : "Activate"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(p.id, p.title)}
+                    disabled={busyId === p.id}
+                    className="liquid-chip pressable pill px-3 py-1.5 text-xs font-semibold opacity-75 hover:text-rose-500 hover:opacity-100"
+                    aria-label={`Delete ${p.title}`}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              {Array.isArray(p.days) && p.days.length > 0 && (
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {p.days.map((d) => (
+                    <Link
+                      key={`${p.id}-d${d.day}`}
+                      href={`/practice?technique=${d.slug}&minutes=${d.minutes}`}
+                      onClick={() => hapticTap()}
+                      className="liquid-chip pressable flex items-center gap-2.5 rounded-2xl p-2.5 text-left transition hover:border-amber-600/40"
+                    >
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[0.68rem] font-bold text-[var(--bg)]">
+                        D{d.day}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-bold">{d.name}</span>
+                        <span className="block truncate text-[0.68rem] opacity-65">
+                          {d.focus} · {d.minutes}m
+                        </span>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AgentDebrief({
-  techniqueName, minutes, moodBefore, moodAfter, visible,
+  techniqueName,
+  minutes,
+  moodBefore,
+  moodAfter,
+  visible,
 }: {
-  techniqueName: string; minutes: number; moodBefore: number | null; moodAfter: number | null; visible: boolean;
+  techniqueName: string;
+  minutes: number;
+  moodBefore: number | null;
+  moodAfter: number | null;
+  visible: boolean;
 }) {
   const [data, setData] = useState<{ headline: string; insight: string; journalPrompt: string; next: { slug: string; name: string } | null } | null>(null);
   useEffect(() => {

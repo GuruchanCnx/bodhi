@@ -1,17 +1,18 @@
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
-import { db } from "@/db";
-import { meditationTechniques, practicePlans } from "@/db/schema";
 import { briefingCopy, debriefCopy, planArchetype } from "@/lib/agentic";
+import { allCanonTechniques, queryCanon } from "@/lib/canon";
+import {
+  activatePracticePlanInFirestore,
+  deletePracticePlanFromFirestore,
+  getPracticePlansFromFirestore,
+  getSessionsFromFirestore,
+  savePracticePlanToFirestore,
+} from "@/lib/firestore-service";
 
 export const dynamic = "force-dynamic";
 
-import { getSessionsFromFirestore } from "@/lib/firestore-service";
-import { meditations } from "@/lib/content";
-
-// ---------- helpers ----------
 async function getStatsFast() {
   try {
-    const sessions = await getSessionsFromFirestore(100).catch(() => []);
+    const sessions = await getSessionsFromFirestore(120).catch(() => []);
     const completed = sessions.filter((s) => s.completed !== false);
     const totalSessions = completed.length;
     let totalSeconds = 0;
@@ -43,52 +44,27 @@ async function getStatsFast() {
   }
 }
 
-async function pickOne(category: string, exclude: Set<string>, minutes: number, level?: string) {
-  const filters = [eq(meditationTechniques.category, category)];
-  const rows = await db
-    .select({
-      slug: meditationTechniques.slug,
-      name: meditationTechniques.name,
-      pali: meditationTechniques.pali,
-      tradition: meditationTechniques.tradition,
-      level: meditationTechniques.level,
-      category: meditationTechniques.category,
-      durations: meditationTechniques.durations,
-      essence: meditationTechniques.essence,
-      color: meditationTechniques.color,
-      symbol: meditationTechniques.symbol,
-    })
-    .from(meditationTechniques)
-    .where(and(...filters))
-    .orderBy(meditationTechniques.name)
-    .limit(60);
-  const pool = rows.filter((r) => !exclude.has(r.slug));
-  const src = pool.length ? pool : rows;
-  if (!src.length) {
-    const fallback = meditations
-      .map((m) => ({
-        slug: m.slug,
-        name: m.name,
-        pali: m.pali,
-        tradition: m.tradition,
-        level: m.level,
-        category: m.tradition === "Theravāda" ? "Breath" : "Insight",
-        durations: m.durations,
-        essence: m.essence,
-        color: m.color,
-        symbol: m.symbol,
-      }))
-      .filter((r) => !exclude.has(r.slug));
-    const fallbackPool = fallback.length ? fallback : meditations;
-    return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+function pickOneFromCanon(
+  category: string,
+  exclude: Set<string>,
+  minutes: number,
+  level?: string
+) {
+  const inCat = allCanonTechniques.filter((t) => t.category === category);
+  const src = inCat.length ? inCat : allCanonTechniques;
+  const pool = src.filter((r) => !exclude.has(r.slug));
+  const candidates = pool.length ? pool : src;
+
+  const durationMatches = candidates.filter((r) => (r.durations ?? []).includes(minutes));
+  const narrowed = durationMatches.length ? durationMatches : candidates;
+
+  if (level && level !== "All Levels") {
+    const levelMatches = narrowed.filter((r) => r.level === level);
+    if (levelMatches.length) {
+      return levelMatches[Math.floor(Math.random() * levelMatches.length)];
+    }
   }
-  // prefer duration match, then level match, deterministic by day seed
-  const idx = Math.floor(Math.random() * src.length);
-  // try duration fit first
-  const fit = src.find((r) => ((r.durations as number[]) ?? []).includes(minutes));
-  const chosen = fit ?? src[idx % src.length];
-  void level;
-  return chosen;
+  return narrowed[Math.floor(Math.random() * narrowed.length)];
 }
 
 // ---------- GET: briefing | suggest | plans | insight ----------
@@ -98,36 +74,28 @@ export async function GET(req: Request) {
 
   if (action === "suggest") {
     const q = (url.searchParams.get("q") || "").trim().slice(0, 60);
-    if (q.length < 2) return Response.json({ suggestions: [] });
-    try {
-      const like = `%${q.replace(/[%_]/g, "")}%`;
-      const rows = await db
-        .select({
-          slug: meditationTechniques.slug,
-          name: meditationTechniques.name,
-          tradition: meditationTechniques.tradition,
-          category: meditationTechniques.category,
-          color: meditationTechniques.color,
-          symbol: meditationTechniques.symbol,
-        })
-        .from(meditationTechniques)
-        .where(or(ilike(meditationTechniques.name, like), ilike(meditationTechniques.description, like))!)
-        .orderBy(sql`similarity(${meditationTechniques.name}, ${q}) DESC`)
-        .limit(6);
-      const res = Response.json({ suggestions: rows });
-      res.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
-      return res;
-    } catch {
-      return Response.json({ suggestions: [] });
-    }
+    if (q.length < 2) return Response.json({ suggestions: [], total: allCanonTechniques.length });
+    const { techniques, total } = queryCanon({ q, suggest: true, pageSize: 8 });
+    const suggestions = techniques.map((t) => ({
+      slug: t.slug,
+      name: t.name,
+      pali: t.pali,
+      tradition: t.tradition,
+      level: t.level,
+      category: t.category,
+      durations: t.durations,
+      color: t.color,
+      symbol: t.symbol,
+    }));
+    const res = Response.json({ suggestions, total });
+    res.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+    return res;
   }
 
   if (action === "plans") {
     try {
-      const rows = await db.select().from(practicePlans).orderBy(desc(practicePlans.createdAt)).limit(10);
-      const res = Response.json({ plans: rows });
-      res.headers.set("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
-      return res;
+      const plans = await getPracticePlansFromFirestore(12);
+      return Response.json({ plans });
     } catch {
       return Response.json({ plans: [] });
     }
@@ -136,9 +104,13 @@ export async function GET(req: Request) {
   if (action === "insight") {
     const s = await getStatsFast();
     let text = "Your path begins with a single breath — today's 5 minutes count double.";
-    if (s.sessions > 0 && s.streak >= 7) text = `🔥 ${s.streak}-day thread with ${s.sessions} sits. Protect it: same time, tiny minimum, forgiving restarts. Next edge: lengthen one sit by 5 min.`;
-    else if (s.sessions > 0 && s.streak >= 1) text = `${s.streak}-day streak alive across ${s.sessions} sits (avg ~${s.avgMinutes || 10} min). Depth in one door opens all doors — revisit your most-used family this week.`;
-    else if (s.sessions > 0) text = `${s.sessions} sits banked. Streaks grow by gentleness: pick one anchor technique and return 3 days in a row.`;
+    if (s.sessions > 0 && s.streak >= 7) {
+      text = `🔥 ${s.streak}-day thread with ${s.sessions} sits. Protect it: same time, tiny minimum, forgiving restarts. Next edge: lengthen one sit by 5 min.`;
+    } else if (s.sessions > 0 && s.streak >= 1) {
+      text = `${s.streak}-day streak alive across ${s.sessions} sits (avg ~${s.avgMinutes || 10} min). Depth in one door opens all doors — revisit your most-used family this week.`;
+    } else if (s.sessions > 0) {
+      text = `${s.sessions} sits banked. Streaks grow by gentleness: pick one anchor technique and return 3 days in a row.`;
+    }
     const res = Response.json({ insight: text, stats: s });
     res.headers.set("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
     return res;
@@ -146,30 +118,26 @@ export async function GET(req: Request) {
 
   // default: briefing
   const hour = Number(url.searchParams.get("hour") ?? new Date().getHours());
+  const safeHour = Number.isFinite(hour) ? hour : new Date().getHours();
   const s = await getStatsFast();
-  const b = briefingCopy(Number.isFinite(hour) ? hour : new Date().getHours(), s.streak, s.sessions);
-  // one-tap sit: find a real technique matching mood hint
+  const b = briefingCopy(safeHour, s.streak, s.sessions);
+
   let sit: { slug: string; name: string; minutes: number } | null = null;
-  try {
-    const like = `%${b.moodHint.split(" ")[0]}%`;
-    const rows = await db
-      .select({ slug: meditationTechniques.slug, name: meditationTechniques.name, durations: meditationTechniques.durations })
-      .from(meditationTechniques)
-      .where(or(ilike(meditationTechniques.name, like), ilike(meditationTechniques.description, like))!)
-      .limit(5);
-    const r = rows[0];
-    if (r) {
-      const ds = (r.durations as number[]) ?? [10];
-      const mins = ds.includes(b.minutes) ? b.minutes : ds[0] ?? b.minutes;
-      sit = { slug: r.slug, name: r.name, minutes: mins };
-    }
-  } catch {}
+  const keyword = b.moodHint.split(" ")[0] || "breath";
+  const matched = queryCanon({ q: keyword, suggest: true }).techniques;
+  const r = matched[0] ?? allCanonTechniques[0];
+  if (r) {
+    const ds = r.durations ?? [10];
+    const mins = ds.includes(b.minutes) ? b.minutes : ds[0] ?? b.minutes;
+    sit = { slug: r.slug, name: r.name, minutes: mins };
+  }
+
   const res = Response.json({ ...b, stats: s, sit });
   res.headers.set("Cache-Control", "public, s-maxage=120, stale-while-revalidate=600");
   return res;
 }
 
-// ---------- POST: plan | debrief | activate-plan ----------
+// ---------- POST: plan | debrief | activate-plan | delete-plan ----------
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -182,32 +150,27 @@ export async function POST(req: Request) {
         minutes: Math.max(1, Math.min(180, Number(body.minutes) || 10)),
         techniqueName: String(body.techniqueName || "sitting").slice(0, 120),
       });
-      // next-step suggestion: one real technique in complementary family
-      let next: { slug: string; name: string } | null = null;
-      try {
-        const rows = await db
-          .select({ slug: meditationTechniques.slug, name: meditationTechniques.name })
-          .from(meditationTechniques)
-          .orderBy(sql`random()`)
-          .limit(1);
-        if (rows[0]) next = rows[0];
-      } catch {}
+      const pick =
+        allCanonTechniques[Math.floor(Math.random() * Math.min(200, allCanonTechniques.length))];
+      const next = pick ? { slug: pick.slug, name: pick.name } : null;
       return Response.json({ ...out, next });
     }
 
     if (action === "activate-plan") {
       const id = String(body.id || "");
       if (!id) return Response.json({ error: "id required" }, { status: 400 });
-      try {
-        await db.execute(sql`update practice_plans set active = false`);
-        await db.update(practicePlans).set({ active: true }).where(eq(practicePlans.id, id));
-        return Response.json({ ok: true });
-      } catch {
-        return Response.json({ error: "activate failed" }, { status: 500 });
-      }
+      await activatePracticePlanInFirestore(id);
+      return Response.json({ ok: true });
     }
 
-    // default: build 7-day plan
+    if (action === "delete-plan") {
+      const id = String(body.id || "");
+      if (!id) return Response.json({ error: "id required" }, { status: 400 });
+      await deletePracticePlanFromFirestore(id);
+      return Response.json({ ok: true });
+    }
+
+    // default: build 7-day plan from the living canon
     const goal = String(body.goal || "balanced").slice(0, 200);
     const minutesPerDay = Math.max(5, Math.min(60, Number(body.minutesPerDay) || 10));
     const level = String(body.level || "All Levels").slice(0, 30);
@@ -223,12 +186,13 @@ export async function POST(req: Request) {
       "Gentle integration",
       "Dedicate + rest in glow",
     ];
+
     for (let d = 1; d <= 7; d++) {
       const cat = arch.categories[(d - 1) % arch.categories.length];
-      const pick = await pickOne(cat, exclude, minutesPerDay, level);
+      const pick = pickOneFromCanon(cat, exclude, minutesPerDay, level);
       if (pick) {
         exclude.add(pick.slug);
-        const ds = (pick.durations as number[]) ?? [minutesPerDay];
+        const ds = pick.durations ?? [minutesPerDay];
         days.push({
           day: d,
           slug: pick.slug,
@@ -241,23 +205,28 @@ export async function POST(req: Request) {
     if (!days.length) return Response.json({ error: "could not build plan" }, { status: 500 });
 
     const title = `7 days · ${arch.key} · ${minutesPerDay}m`;
-    let saved: { id: string } | null = null;
+    let savedId: string | null = null;
     if (body.save === true) {
       try {
-        const [row] = await db
-          .insert(practicePlans)
-          .values({ title, goal: goal.slice(0, 300), minutesPerDay, level, days, active: false })
-          .returning({ id: practicePlans.id });
-        saved = row ?? null;
+        const saved = await savePracticePlanToFirestore({
+          title,
+          goal: goal.slice(0, 200),
+          minutesPerDay,
+          level,
+          days,
+          active: false,
+        });
+        savedId = saved.id;
       } catch (e) {
         console.error("[plan] save fail", e);
       }
     }
+
     const res = Response.json({
       title,
       note: arch.note,
       days,
-      savedId: saved?.id ?? null,
+      savedId,
     });
     res.headers.set("Cache-Control", "no-store");
     return res;

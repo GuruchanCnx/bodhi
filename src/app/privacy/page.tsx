@@ -15,8 +15,8 @@ export default function PrivacyPage() {
         <section>
           <h2 className="font-semibold">Where your data lives</h2>
           <p className="mt-1 opacity-80">
-            Sittings, reflections, and plans are stored in the sanctuary&apos;s PostgreSQL database
-            behind this app. Nothing is sold, shared, or sent to third parties. There are no
+            Sittings, reflections, habits, and plans are stored in the sanctuary&apos;s Firebase
+            Firestore database. Nothing is sold, shared, or sent to third parties. There are no
             analytics scripts, no ad pixels, no cookies for tracking.
           </p>
         </section>

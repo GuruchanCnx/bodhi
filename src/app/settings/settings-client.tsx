@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FoldHint, SplitPane } from "@/components/adaptive";
 import { InstallButton, ReminderBell, DataControls } from "@/components/platform";
 import ThemeToggleClient from "@/components/theme-toggle";
-import { useTheme } from "@/components/chrome";
+import { useTheme, useToast } from "@/components/chrome";
+import { hapticSuccess, isHapticsEnabled } from "@/lib/haptics";
 
 function Appearance() {
   const { mode, resolved } = useTheme();
@@ -26,6 +28,55 @@ function Appearance() {
         <li>✦ Reduce Motion (system setting) stills petals, orbs, and aurora drift.</li>
         <li>✦ Large text &amp; high contrast respected through semantic color tokens.</li>
       </ul>
+    </section>
+  );
+}
+
+function HapticsControl() {
+  const [enabled, setEnabled] = useState(true);
+  const toast = useToast();
+
+  useEffect(() => {
+    setEnabled(isHapticsEnabled());
+  }, []);
+
+  const toggle = () => {
+    const next = !enabled;
+    setEnabled(next);
+    try {
+      localStorage.setItem("bodhi-haptics", String(next));
+    } catch {}
+    if (next) {
+      hapticSuccess();
+      toast("✦ Tactile haptics enabled");
+    } else {
+      toast("Tactile haptics muted", "info");
+    }
+  };
+
+  return (
+    <section className="liquid-card squircle p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">Touch &amp; Tactile</p>
+          <h2 className="font-display ios-title mt-1 text-2xl">Tactile Haptics</h2>
+          <p className="mt-1 text-xs leading-relaxed opacity-75">
+            Subtle vibration pulses on mobile browsers when toggling favorites, completing habits, logging mood, or starting the timer.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-pressed={enabled}
+          className={`pressable pill shrink-0 px-4 py-2 text-xs font-bold transition ${
+            enabled
+              ? "bg-emerald-600 text-white shadow-sm"
+              : "liquid-chip opacity-80"
+          }`}
+        >
+          {enabled ? "On ✦" : "Off"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -63,7 +114,7 @@ function About() {
       <p className="mt-2 text-xs leading-relaxed opacity-80">
         1,048 meditation methods across Theravāda, Zen, Mahāyāna, Tibetan and Pure Land lineages —
         bowl timer, Dhamma library, journal, journey analytics, and an agentic Guide that reasons in
-        the open. Built with Next.js + PostgreSQL; your practice data never leaves this sanctuary.
+        the open. Built with Next.js + Firebase Firestore; your practice data stays private to this sanctuary.
       </p>
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
         <Link href="/library" className="liquid-chip pill px-3 py-1.5 font-bold">Great Canon</Link>
@@ -82,7 +133,7 @@ export default function SettingsClient() {
       <div className="mx-auto mt-4 max-w-2xl text-center">
         <p className="text-[0.68rem] font-bold uppercase tracking-[0.28em] text-[var(--accent)]">Sanctuary settings</p>
         <h1 className="font-display ios-title mt-2 text-balance text-4xl md:text-[2.75rem]">Tune the vessel</h1>
-        <p className="mt-2 text-sm opacity-75">Appearance, reminders, install, and your data — all under your own roof.</p>
+        <p className="mt-2 text-sm opacity-75">Appearance, haptics, reminders, install, and your data — all under your own roof.</p>
       </div>
 
       <div className="mt-8">
@@ -93,6 +144,7 @@ export default function SettingsClient() {
           left={
             <div className="space-y-4">
               <Appearance />
+              <HapticsControl />
               <ReminderBell />
               <Shortcuts />
             </div>

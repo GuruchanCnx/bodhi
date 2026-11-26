@@ -4,17 +4,10 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { playSoftTick, unlockAudio } from "@/lib/audio";
+import { triggerHaptic } from "@/lib/haptics";
 
-/**
- * Browser Haptic Feedback helper utilizing Navigator Vibration API.
- * Gracefully silent on unsupported devices or iOS without WebKit vibration flags.
- */
 function vibrateHaptic(pattern: number | number[] = 15) {
-  try {
-    if (typeof window !== "undefined" && "vibrate" in navigator) {
-      navigator.vibrate(pattern);
-    }
-  } catch {}
+  triggerHaptic(pattern);
 }
 
 export default function OneHandNav() {

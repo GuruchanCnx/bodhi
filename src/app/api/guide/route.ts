@@ -1,8 +1,7 @@
-import { and, eq, ilike, or, sql } from "drizzle-orm";
-import { db } from "@/db";
-import { meditationTechniques } from "@/db/schema";
-import { buildPlanReply, moodReply, parseGuideQuery, type GuideContext } from "@/lib/agent";
-import { buildReply, expandQuery, followUps, rankTechniques, type AgentMemory } from "@/lib/agentic";
+import { moodReply, parseGuideQuery, type GuideContext } from "@/lib/agent";
+import { buildReply, expandQuery, followUps, rankTechniques, type AgentMemory, type LiteTech } from "@/lib/agentic";
+import { allCanonTechniques } from "@/lib/canon";
+import { getSessionsFromFirestore } from "@/lib/firestore-service";
 
 export const dynamic = "force-dynamic";
 
@@ -40,52 +39,55 @@ async function gatherMemory(context: GuideContext): Promise<AgentMemory> {
     hour: new Date().getHours(),
   };
   try {
-    const r = await db.execute(sql`
-      select count(*)::int as sessions, coalesce(avg(duration_seconds),0)::int as avg
-      from meditation_sessions where completed = true`);
-    const row = r.rows[0] as unknown as { sessions: number; avg: number };
-    mem.totalSessions = row.sessions ?? 0;
-    void row.avg;
+    const sessions = await getSessionsFromFirestore(60).catch(() => []);
+    const completed = sessions.filter((s) => s.completed !== false);
+    mem.totalSessions = completed.length;
+    if (completed.length > 0 && mem.avgMinutes == null) {
+      const sum = completed.reduce((acc, s) => acc + s.durationSeconds, 0);
+      mem.avgMinutes = Math.round(sum / completed.length / 60);
+    }
   } catch {}
   return mem;
 }
 
-async function searchCandidates(intent: ReturnType<typeof parseGuideQuery>, expanded: string[]) {
-  const filters = [];
-  if (intent.traditions.length === 1) filters.push(eq(meditationTechniques.tradition, intent.traditions[0]));
-  if (intent.levels.length === 1) filters.push(eq(meditationTechniques.level, intent.levels[0]));
-  if (intent.categories.length === 1) filters.push(eq(meditationTechniques.category, intent.categories[0]));
+function searchCanonCandidates(
+  intent: ReturnType<typeof parseGuideQuery>,
+  expanded: string[]
+): LiteTech[] {
+  let pool = allCanonTechniques;
 
-  const cols = {
-    slug: meditationTechniques.slug, name: meditationTechniques.name, pali: meditationTechniques.pali,
-    tradition: meditationTechniques.tradition, level: meditationTechniques.level,
-    category: meditationTechniques.category, durations: meditationTechniques.durations,
-    description: meditationTechniques.description, essence: meditationTechniques.essence,
-    color: meditationTechniques.color, symbol: meditationTechniques.symbol,
-  };
-
-  const baseWhere = filters.length ? and(...filters) : undefined;
-  const primary = await db.select(cols).from(meditationTechniques).where(baseWhere).orderBy(meditationTechniques.name).limit(120);
-  let candidates = primary.map((r) => ({ ...r, durations: (r.durations as number[]) ?? [] }));
-
-  // blend keyword + expanded-synonym search when pool is thin or query is specific
-  const keys = [...intent.keywords.slice(0, 3), ...expanded.slice(0, 3)];
-  if (keys.length && candidates.length < 80) {
-    const ors = keys.slice(0, 5).map((k) => {
-      const like = `%${k}%`;
-      return or(ilike(meditationTechniques.name, like), ilike(meditationTechniques.description, like))!;
-    });
-    try {
-      const kwRows = await db.select(cols).from(meditationTechniques).where(or(...ors)!).limit(60);
-      const seen = new Set(candidates.map((c) => c.slug));
-      for (const r of kwRows) {
-        if (!seen.has(r.slug)) {
-          candidates.push({ ...r, durations: (r.durations as number[]) ?? [] });
-          seen.add(r.slug);
-        }
-      }
-    } catch {}
+  if (intent.traditions.length === 1) {
+    const byTrad = pool.filter((t) => t.tradition === intent.traditions[0]);
+    if (byTrad.length >= 12) pool = byTrad;
   }
+  if (intent.levels.length === 1) {
+    const byLvl = pool.filter((t) => t.level === intent.levels[0]);
+    if (byLvl.length >= 12) pool = byLvl;
+  }
+  if (intent.categories.length === 1) {
+    const byCat = pool.filter((t) => t.category === intent.categories[0]);
+    if (byCat.length >= 8) pool = byCat;
+  }
+
+  let candidates = pool.slice(0, 120);
+
+  // Blend keyword + expanded-synonym matches from full canon
+  const keys = [...intent.keywords.slice(0, 4), ...expanded.slice(0, 4)].map((k) =>
+    k.toLowerCase()
+  );
+  if (keys.length) {
+    const seen = new Set(candidates.map((c) => c.slug));
+    for (const t of allCanonTechniques) {
+      if (candidates.length >= 180) break;
+      if (seen.has(t.slug)) continue;
+      const hay = `${t.name} ${t.description}`.toLowerCase();
+      if (keys.some((k) => hay.includes(k))) {
+        candidates.push(t);
+        seen.add(t.slug);
+      }
+    }
+  }
+
   return candidates;
 }
 
@@ -96,37 +98,63 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const message = String(body.message || "").slice(0, 1000);
     const context = (body.context || {}) as GuideContext & { favorites?: string[] };
-    const history: { role: string; text: string }[] = Array.isArray(body.history) ? body.history.slice(-8) : [];
+    const history: { role: string; text: string }[] = Array.isArray(body.history)
+      ? body.history.slice(-8)
+      : [];
     if (!message.trim()) return Response.json({ error: "message required" }, { status: 400 });
 
-    // enrich memory: client favorites + server stats
+    // Enrich memory: client favorites + Firestore session history
     const mem = await gatherMemory(context);
     mem.favorites = Array.isArray(context.favorites) ? context.favorites.slice(0, 100) : [];
     void history;
 
     const intent = parseGuideQuery(message, context);
     const expanded = expandQuery(message);
-    const candidates = await searchCandidates(intent, expanded).catch(() => []);
+    const candidates = searchCanonCandidates(intent, expanded);
     const { recs, steps } = rankTechniques(candidates, intent, mem, 6);
 
     const recList: Rec[] = recs.map((c) => ({
-      slug: c.slug, name: c.name, pali: c.pali, tradition: c.tradition, level: c.level,
-      category: c.category, durations: c.durations, essence: c.essence,
-      description: c.description.slice(0, 220), color: c.color, symbol: c.symbol, reason: c.reason,
+      slug: c.slug,
+      name: c.name,
+      pali: c.pali,
+      tradition: c.tradition,
+      level: c.level,
+      category: c.category,
+      durations: c.durations,
+      essence: c.essence,
+      description: c.description.slice(0, 220),
+      color: c.color,
+      symbol: c.symbol,
+      reason: c.reason,
     }));
 
     const fallback = dhammaFallback(message);
     const moodLine = moodReply(intent.moods);
     let reply: string;
-    if (recList.length) reply = `${moodLine ? moodLine + " " : ""}${buildReply(intent, recList.length, mem)}`;
-    else if (fallback) reply = fallback;
-    else reply = "I hear you. Tell me minutes + heart (anxious, restless, dull, sad, focus)? I'll match you to the canon.";
+    if (recList.length) {
+      reply = `${moodLine ? moodLine + " " : ""}${buildReply(intent, recList.length, mem)}`;
+    } else if (fallback) {
+      reply = fallback;
+    } else {
+      reply =
+        "I hear you. Tell me minutes + heart (anxious, restless, dull, sad, focus)? I'll match you to the canon.";
+    }
 
     const actions =
       recList.length > 0
         ? [
-            { label: `▶ Start: ${recList[0].name.slice(0, 28)}`, href: `/practice?technique=${recList[0].slug}&minutes=${intent.minutes ?? recList[0].durations[0] ?? 10}` },
-            { label: "🗓 Make it a 7-day plan", href: `/plan?goal=${encodeURIComponent(message.slice(0, 80))}&minutes=${intent.minutes ?? 10}` },
+            {
+              label: `▶ Start: ${recList[0].name.slice(0, 28)}`,
+              href: `/practice?technique=${recList[0].slug}&minutes=${
+                intent.minutes ?? recList[0].durations[0] ?? 10
+              }`,
+            },
+            {
+              label: "🗓 Make it a 7-day plan",
+              href: `/plan?goal=${encodeURIComponent(message.slice(0, 80))}&minutes=${
+                intent.minutes ?? 10
+              }`,
+            },
             { label: "📚 Open library", href: "/library" },
           ]
         : [{ label: "🔔 Just sit 10 min", href: "/practice?minutes=10" }];
@@ -138,7 +166,7 @@ export async function POST(req: Request) {
       intent,
       steps,
       followUps: followUps(intent),
-      total: 1040,
+      total: allCanonTechniques.length,
     };
 
     if (!stream) {
@@ -147,7 +175,7 @@ export async function POST(req: Request) {
       return res;
     }
 
-    // ---- SSE streaming: reasoning steps → reply chunks → done ----
+    // ---- SSE streaming: reasoning steps -> reply chunks -> done ----
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       start(controller) {
@@ -157,15 +185,14 @@ export async function POST(req: Request) {
         (async () => {
           for (const s of steps) {
             send("step", s);
-            await new Promise((r) => setTimeout(r, 120));
+            await new Promise((r) => setTimeout(r, 90));
           }
-          // stream reply in word-chunks for typewriter effect
           const words = reply.split(" ");
           let acc = "";
           for (let i = 0; i < words.length; i += 4) {
             acc = words.slice(0, i + 4).join(" ");
             send("token", { text: acc });
-            await new Promise((r) => setTimeout(r, 40));
+            await new Promise((r) => setTimeout(r, 32));
           }
           send("done", payload);
           controller.close();

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTheme, type ThemeMode } from "./chrome";
+import { hapticTap } from "@/lib/haptics";
 
 const OPTIONS: { id: ThemeMode; icon: string; label: string; hint: string }[] = [
   { id: "dawn", icon: "☀️", label: "Dawn", hint: "Warm light sanctuary" },
@@ -18,7 +19,10 @@ export default function ThemeToggleClient({ compact = false }: { compact?: boole
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          hapticTap();
+          setOpen((v) => !v);
+        }}
         aria-label={`Theme: ${current.label} (resolved ${resolved}). Change theme`}
         aria-expanded={open}
         title={`${current.label} · ${current.hint} — click to change`}
@@ -50,6 +54,7 @@ export default function ThemeToggleClient({ compact = false }: { compact?: boole
                   role="menuitemradio"
                   aria-checked={mode === o.id}
                   onClick={() => {
+                    hapticTap();
                     setMode(o.id);
                     setOpen(false);
                   }}
